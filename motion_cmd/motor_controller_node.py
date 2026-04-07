@@ -129,10 +129,26 @@ def parse_html_content(html_content):
 # ──────────────────────────────────────────────
 
 class MotorControllerNode(Node):
-    COM_PORT = "/dev/ttyACM0"
 
     def __init__(self):
         super().__init__("motor_controller")
+
+        # ── Declare ROS2 parameters (hardcoded defaults) ──
+        self.declare_parameter("com_port",            "/dev/ttyACM0")
+        self.declare_parameter("baudrate",            19200)
+        self.declare_parameter("serial_timeout",      0.5)
+        self.declare_parameter("serial_write_timeout",0.5)
+        self.declare_parameter("max_position_mm",     29.0)
+        self.declare_parameter("frame_delay",         0.1)
+        self.declare_parameter("heartbeat_interval",  0.2)
+
+        com_port             = self.get_parameter("com_port").value
+        baudrate             = self.get_parameter("baudrate").value
+        serial_timeout       = self.get_parameter("serial_timeout").value
+        serial_write_timeout = self.get_parameter("serial_write_timeout").value
+        self._max_pos        = self.get_parameter("max_position_mm").value
+        self._frame_delay    = self.get_parameter("frame_delay").value
+        self._hb_interval    = self.get_parameter("heartbeat_interval").value
 
         self._serial_lock = threading.Lock()
         self._stop_event = threading.Event()
@@ -141,17 +157,17 @@ class MotorControllerNode(Node):
         # Open serial port once for the lifetime of the node
         try:
             self._ser = serial.Serial(
-                port=self.COM_PORT,
-                baudrate=19200,
+                port=com_port,
+                baudrate=baudrate,
                 bytesize=serial.EIGHTBITS,
                 parity=serial.PARITY_EVEN,
                 stopbits=serial.STOPBITS_ONE,
-                timeout=0.5,
-                write_timeout=0.5,
+                timeout=serial_timeout,
+                write_timeout=serial_write_timeout,
             )
-            self.get_logger().info(f"Opened {self.COM_PORT} successfully.")
+            self.get_logger().info(f"Opened {com_port} successfully.")
         except serial.SerialException as e:
-            self.get_logger().fatal(f"Failed to open {self.COM_PORT}: {e}")
+            self.get_logger().fatal(f"Failed to open {com_port}: {e}")
             raise
 
         self.create_subscription(Float32MultiArray, "/motor_cmd", self._cmd_callback, 10)
@@ -175,8 +191,8 @@ class MotorControllerNode(Node):
         pos_mm = float(msg.data[0])
         spd_mms = float(msg.data[1])
 
-        if not (0.0 <= pos_mm <= 29.0):
-            self.get_logger().error(f"Position {pos_mm} mm out of range [0, 29] — ignoring.")
+        if not (0.0 <= pos_mm <= self._max_pos):
+            self.get_logger().error(f"Position {pos_mm} mm out of range [0, {self._max_pos}] — ignoring.")
             return
         if spd_mms <= 0.0:
             self.get_logger().error(f"Speed must be > 0 mm/s — ignoring.")
@@ -233,7 +249,7 @@ class MotorControllerNode(Node):
             for i, payload in enumerate(payloads):
                 self.get_logger().info(f"[Frame {i+1}/{len(payloads)}] {payload.hex(' ')}")
                 self._ser.write(payload)
-                time.sleep(0.1)
+                time.sleep(self._frame_delay)
                 if self._ser.in_waiting > 0:
                     resp = self._ser.read(self._ser.in_waiting)
                     self.get_logger().info(f"  Response: {resp.hex(' ')}")
@@ -272,7 +288,7 @@ class MotorControllerNode(Node):
                 ping_count += 1
                 if ping_count % 5 == 0:
                     self.get_logger().info(f"Motor alive... {ping_count} pings sent.", throttle_duration_sec=1.0)
-            self._stop_event.wait(timeout=0.2)
+            self._stop_event.wait(timeout=self._hb_interval)
 
     # ── Cleanup ────────────────────────────────
 
