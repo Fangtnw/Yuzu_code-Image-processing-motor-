@@ -47,6 +47,7 @@ STATUS_COLORS = {
 class MotorGUI:
     MAX_POS   = 29.0
     MIN_SPEED = 0.1
+    MAX_SPEED = 100.0  # DR28T2.5B03 rated max (datasheet)
 
     def __init__(self, root: tk.Tk, node: MotorGuiNode):
         self._root = root
@@ -91,7 +92,7 @@ class MotorGUI:
         self._spd_var = tk.StringVar(value="3.0")
         spd_entry = ttk.Entry(motion_frame, textvariable=self._spd_var, width=12)
         spd_entry.grid(row=1, column=1, sticky="w", padx=(8, 0), pady=4)
-        tk.Label(motion_frame, text=f"  [> {self.MIN_SPEED}]", fg="gray").grid(row=1, column=2, sticky="w")
+        tk.Label(motion_frame, text=f"  [{self.MIN_SPEED} – {self.MAX_SPEED}]", fg="gray").grid(row=1, column=2, sticky="w")
 
         self._send_btn = ttk.Button(motion_frame, text="Send Command", command=self._on_send)
         self._send_btn.grid(row=2, column=0, columnspan=3, pady=(12, 0), sticky="ew")
@@ -135,8 +136,8 @@ class MotorGUI:
         if not (0.0 <= pos <= self.MAX_POS):
             messagebox.showerror("Out of Range", f"Position must be between 0 and {self.MAX_POS} mm.")
             return
-        if spd <= self.MIN_SPEED:
-            messagebox.showerror("Out of Range", f"Speed must be greater than {self.MIN_SPEED} mm/s.")
+        if not (self.MIN_SPEED <= spd <= self.MAX_SPEED):
+            messagebox.showerror("Out of Range", f"Speed must be between {self.MIN_SPEED} and {self.MAX_SPEED} mm/s.")
             return
 
         self._node.send_cmd(pos, spd)

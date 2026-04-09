@@ -1,7 +1,15 @@
 {
   "permissions": {
     "allow": [
-      "Bash(python motor_gui.py)"
+      "Bash(python motor_gui.py)",
+      "WebSearch",
+      "WebFetch(domain:www.orientalmotor.com)",
+      "WebFetch(domain:catalog.orientalmotor.com)",
+      "WebFetch(domain:www.orientalmotor.eu)",
+      "WebFetch(domain:www.orientalmotorforum.com)",
+      "Bash(python -c \"import reportlab; print\\('ok'\\)\")",
+      "Bash(pip install:*)",
+      "Bash(python generate_manual.py)"
     ]
   }
 }

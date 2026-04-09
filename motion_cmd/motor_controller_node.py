@@ -138,7 +138,8 @@ class MotorControllerNode(Node):
         self.declare_parameter("baudrate",            19200)
         self.declare_parameter("serial_timeout",      0.5)
         self.declare_parameter("serial_write_timeout",0.5)
-        self.declare_parameter("max_position_mm",     29.0)
+        self.declare_parameter("max_position_mm",     29.0)   # physical stroke is 30 mm
+        self.declare_parameter("max_speed_mms",       100.0)  # DR28T2.5B03 rated max
         self.declare_parameter("frame_delay",         0.1)
         self.declare_parameter("heartbeat_interval",  0.2)
 
@@ -147,6 +148,7 @@ class MotorControllerNode(Node):
         serial_timeout       = self.get_parameter("serial_timeout").value
         serial_write_timeout = self.get_parameter("serial_write_timeout").value
         self._max_pos        = self.get_parameter("max_position_mm").value
+        self._max_spd        = self.get_parameter("max_speed_mms").value
         self._frame_delay    = self.get_parameter("frame_delay").value
         self._hb_interval    = self.get_parameter("heartbeat_interval").value
 
@@ -194,8 +196,8 @@ class MotorControllerNode(Node):
         if not (0.0 <= pos_mm <= self._max_pos):
             self.get_logger().error(f"Position {pos_mm} mm out of range [0, {self._max_pos}] — ignoring.")
             return
-        if spd_mms <= 0.0:
-            self.get_logger().error(f"Speed must be > 0 mm/s — ignoring.")
+        if not (0.0 < spd_mms <= self._max_spd):
+            self.get_logger().error(f"Speed {spd_mms} mm/s out of range (0, {self._max_spd}] — ignoring.")
             return
 
         self.get_logger().info(f"Received command: pos={pos_mm} mm, speed={spd_mms} mm/s")
