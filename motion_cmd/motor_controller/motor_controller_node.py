@@ -152,6 +152,7 @@ class MotorControllerNode(Node):
         self.declare_parameter("max_position_mm",     29.0)
         self.declare_parameter("frame_delay",         0.1)
         self.declare_parameter("heartbeat_interval",  0.2)
+        self.declare_parameter("motor_id",            "motor")
 
         com_port             = self.get_parameter("com_port").value
         baudrate             = self.get_parameter("baudrate").value
@@ -160,6 +161,7 @@ class MotorControllerNode(Node):
         self._max_pos        = self.get_parameter("max_position_mm").value
         self._frame_delay    = self.get_parameter("frame_delay").value
         self._hb_interval    = self.get_parameter("heartbeat_interval").value
+        self._motor_id       = self.get_parameter("motor_id").value
 
         self._serial_lock = threading.Lock()
         self._stop_event = threading.Event()
@@ -176,9 +178,9 @@ class MotorControllerNode(Node):
                 timeout=serial_timeout,
                 write_timeout=serial_write_timeout,
             )
-            self.get_logger().info(f"Opened {com_port} successfully.")
+            self.get_logger().info(f"[{self._motor_id}] Opened {com_port} successfully.")
         except serial.SerialException as e:
-            self.get_logger().fatal(f"Failed to open {com_port}: {e}")
+            self.get_logger().fatal(f"[{self._motor_id}] Failed to open {com_port}: {e}")
             raise
 
         self.create_subscription(Float32MultiArray, "/motor_cmd", self._cmd_callback, 10)
