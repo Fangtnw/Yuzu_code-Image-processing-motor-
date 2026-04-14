@@ -183,9 +183,9 @@ class MotorControllerNode(Node):
             self.get_logger().fatal(f"[{self._motor_id}] Failed to open {com_port}: {e}")
             raise
 
-        self.create_subscription(Float32MultiArray, "/motor_cmd", self._cmd_callback, 10)
-        self.create_subscription(Empty, "/motor_home", self._home_callback, 10)
-        self._status_pub = self.create_publisher(String, "/motor_status", 10)
+        self.create_subscription(Float32MultiArray, "motor_cmd", self._cmd_callback, 10)
+        self.create_subscription(Empty, "motor_home", self._home_callback, 10)
+        self._status_pub = self.create_publisher(String, "motor_status", 10)
         self._publish_status("idle")
 
         self.get_logger().info(

@@ -25,7 +25,7 @@ setup(
             f"motor_controller_node  = {package_name}.motor_controller_node:main",
             f"rotary_motor_stub_node = {package_name}.rotary_motor_stub_node:main",
             f"harvest_sequence_node  = {package_name}.harvest_sequence_node:main",
-            f"motor_gui              = motor_gui:main",
+            f"motor_gui              = {package_name}.motor_gui:main",
         ],
     },
 )
