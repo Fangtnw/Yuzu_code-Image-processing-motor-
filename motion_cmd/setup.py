@@ -22,10 +22,11 @@ setup(
     license="MIT",
     entry_points={
         "console_scripts": [
-            f"motor_controller_node  = {package_name}.motor_controller_node:main",
-            f"rotary_motor_stub_node = {package_name}.rotary_motor_stub_node:main",
-            f"harvest_sequence_node  = {package_name}.harvest_sequence_node:main",
-            f"motor_gui              = {package_name}.motor_gui:main",
+            f"motor_controller_node      = {package_name}.motor_controller_node:main",
+            f"ethernet_ip_motor_node     = {package_name}.ethernet_ip_motor_node:main",
+            f"rotary_motor_stub_node     = {package_name}.rotary_motor_stub_node:main",
+            f"harvest_sequence_node      = {package_name}.harvest_sequence_node:main",
+            f"motor_gui                  = {package_name}.motor_gui:main",
         ],
     },
 )
