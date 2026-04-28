@@ -1,5 +1,5 @@
 """
-Harvest sequence node — orchestrates all 5 DOF for one yuzu peel cycle.
+Peel sequence node — orchestrates all 5 DOF for one yuzu peel cycle.
 
 Machine spec (from 素案):
   Yuzu size      : long axis ~50 mm, short axis ~44 mm
@@ -21,22 +21,22 @@ Step 1 — publish yuzu measurements (optional; improves depth adaptation):
     short_axis_mm — scales peeler advance depth  (nominal 44 mm)
 
 Step 2 — trigger the cycle:
-  Topic : /harvest/start
+  Topic : /peel/start
   Type  : std_msgs/Empty
 
 Monitor:
-  Topic : /harvest/status
+  Topic : /peel/status
   Type  : std_msgs/String
   values: idle | feeding | lowering | spinning_up | peeling |
           retracting | spinning_down | raising | done | error | aborted
 
 Emergency stop:
-  Topic : /harvest/abort
+  Topic : /peel/abort
   Type  : std_msgs/Empty
 =============================================================
 
 All timing and motion values are ROS2 parameters — tune without recompiling:
-  ros2 param set /harvest_sequence peel_duration_s 1.2
+  ros2 param set /peel_sequence peel_duration_s 1.2
 """
 
 import threading
@@ -50,13 +50,13 @@ YUZU_LONG_NOM_MM  = 50.0
 YUZU_SHORT_NOM_MM = 44.0
 
 
-class HarvestSequenceNode(Node):
+class PeelSequenceNode(Node):
 
     def __init__(self):
-        super().__init__("harvest_sequence")
+        super().__init__("peel_sequence")
 
         # ── Motion / timing parameters ──
-        # All values tunable at runtime: ros2 param set /harvest_sequence <name> <value>
+        # All values tunable at runtime: ros2 param set /peel_sequence <name> <value>
         self.declare_parameter("conveyor_settle_s",          1.2)   # wait after conveyor step
         self.declare_parameter("z_lower_pos_mm",            25.0)   # how far Z descends onto yuzu
         self.declare_parameter("z_lower_speed_mms",         15.0)
@@ -90,11 +90,11 @@ class HarvestSequenceNode(Node):
             "conveyor_step":     self.create_publisher(Empty,             "/motor_conveyor/motor_step", 10),
         }
 
-        # ── Harvest interface ──
-        self._status_pub = self.create_publisher(String, "/harvest/status", 10)
-        self.create_subscription(Empty,             "/harvest/start",   self._on_start,         10)
-        self.create_subscription(Empty,             "/harvest/abort",   self._on_abort,         10)
-        self.create_subscription(Float32MultiArray, "/yuzu_detected",   self._on_yuzu_detected, 10)
+        # ── Peel sequence interface ──
+        self._status_pub = self.create_publisher(String, "/peel/status", 10)
+        self.create_subscription(Empty,             "/peel/start",    self._on_start,         10)
+        self.create_subscription(Empty,             "/peel/abort",    self._on_abort,         10)
+        self.create_subscription(Float32MultiArray, "/yuzu_detected", self._on_yuzu_detected, 10)
 
         self._state       = "idle"
         self._abort_event = threading.Event()
@@ -103,12 +103,12 @@ class HarvestSequenceNode(Node):
 
         self._publish_status("idle")
         self.get_logger().info("=" * 60)
-        self.get_logger().info("Harvest sequence node ready.")
-        self.get_logger().info("IMAGE TEAM: publish /yuzu_detected then /harvest/start")
+        self.get_logger().info("Peel sequence node ready.")
+        self.get_logger().info("IMAGE TEAM: publish /yuzu_detected then /peel/start")
         self.get_logger().info("  /yuzu_detected  Float32MultiArray  [x_off, y_off, long_mm, short_mm]")
-        self.get_logger().info("  /harvest/start  Empty")
-        self.get_logger().info("  /harvest/abort  Empty")
-        self.get_logger().info("  /harvest/status String  (output)")
+        self.get_logger().info("  /peel/start     Empty")
+        self.get_logger().info("  /peel/abort     Empty")
+        self.get_logger().info("  /peel/status    String  (output)")
         self.get_logger().info("=" * 60)
 
     # ── External callbacks ─────────────────────────────────────────
@@ -131,9 +131,9 @@ class HarvestSequenceNode(Node):
 
     def _on_start(self, _):
         if self._state not in ("idle", "done", "error", "aborted"):
-            self.get_logger().warn(f"Busy (state={self._state}) — ignoring /harvest/start.")
+            self.get_logger().warn(f"Busy (state={self._state}) — ignoring /peel/start.")
             return
-        self.get_logger().info("Starting harvest sequence.")
+        self.get_logger().info("Starting peel sequence.")
         self._abort_event.clear()
         self._seq_thread = threading.Thread(target=self._run_sequence, daemon=True)
         self._seq_thread.start()
@@ -241,7 +241,7 @@ class HarvestSequenceNode(Node):
     def _set_state(self, state: str):
         self._state = state
         self._publish_status(state)
-        self.get_logger().info(f"Harvest state → {state}")
+        self.get_logger().info(f"Peel state → {state}")
 
     def _publish_status(self, status: str):
         msg = String()
@@ -251,7 +251,7 @@ class HarvestSequenceNode(Node):
 
 def main():
     rclpy.init()
-    node = HarvestSequenceNode()
+    node = PeelSequenceNode()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

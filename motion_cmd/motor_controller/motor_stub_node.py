@@ -1,21 +1,31 @@
 """
-Stub node for rotary / indexed motors.
-Simulates behavior so the full ROS2 graph can be tested without hardware.
-Replace with the real driver node when the motor + controller arrive.
+Motor stub node — simulates all motors that have not yet arrived.
 
-Subscribed topics (relative to namespace):
-  ~/motor_spin   [std_msgs/Float32]  — set target RPM (rotary motors)
+Use this node to run and test the full ROS2 graph (peel_sequence_node,
+motor_controller_node, etc.) with only the one real DR28T motor connected.
+Each instance is launched in its own namespace so a single binary serves
+every pending motor.
+
+Replace this stub with the real driver node when each motor + controller
+arrives and is wired up.
+
+--------------------------------------------------------------------
+Subscribed topics  (relative to node namespace)
+--------------------------------------------------------------------
+  ~/motor_spin   [std_msgs/Float32]  — set target RPM  (rotary motors)
   ~/motor_stop   [std_msgs/Empty]    — stop rotation
   ~/motor_step   [std_msgs/Empty]    — advance one position (conveyor)
 
-Published topics:
-  ~/motor_status [std_msgs/String]   — "idle" | "spinning" | "stepping" | "error"
+Published topics
+--------------------------------------------------------------------
+  ~/motor_status [std_msgs/String]   — "idle" | "spinning" | "stepping"
 
-Parameters:
-  motor_id          (str)   — label for log messages
-  spin_up_time_s    (float) — delay before publishing "spinning" (default 0.3)
-  spin_down_time_s  (float) — delay before publishing "idle" after stop (default 0.2)
-  step_time_s       (float) — conveyor step duration before publishing "idle" (default 1.5)
+Parameters
+--------------------------------------------------------------------
+  motor_id          (str)   — label used in log messages
+  spin_up_time_s    (float) — simulated delay before "spinning"   (default 0.3)
+  spin_down_time_s  (float) — simulated delay before "idle"       (default 0.2)
+  step_time_s       (float) — simulated conveyor step duration    (default 1.5)
 """
 
 import threading
@@ -25,10 +35,10 @@ from rclpy.node import Node
 from std_msgs.msg import Float32, Empty, String
 
 
-class RotaryMotorStubNode(Node):
+class MotorStubNode(Node):
 
     def __init__(self):
-        super().__init__("rotary_motor_stub")
+        super().__init__("motor_stub")
 
         self.declare_parameter("motor_id",         "motor")
         self.declare_parameter("spin_up_time_s",   0.3)
@@ -50,43 +60,39 @@ class RotaryMotorStubNode(Node):
 
         self._publish_status("idle")
         self.get_logger().info(
-            f"[{self._motor_id}] Rotary stub ready  "
+            f"[{self._motor_id}] Motor stub ready  "
             f"(spin_up={self._spin_up_time}s  step={self._step_time}s)"
         )
         self.get_logger().warn(
-            f"[{self._motor_id}] STUB — no hardware. Replace with real driver when motor arrives."
+            f"[{self._motor_id}] STUB — no hardware.  "
+            f"Replace with the real driver node when this motor arrives."
         )
 
-    # ── Callbacks ──────────────────────────────
+    # ── Callbacks ──────────────────────────────────────────────────
 
     def _on_spin(self, msg: Float32):
         rpm = msg.data
         with self._lock:
             self._current_rpm = rpm
         self.get_logger().info(f"[{self._motor_id}] Spinning at {rpm:.1f} rpm (simulated)")
-
-        def _delayed_running():
-            self._publish_status("spinning")
-
-        threading.Timer(self._spin_up_time, _delayed_running).start()
+        threading.Timer(self._spin_up_time, lambda: self._publish_status("spinning")).start()
 
     def _on_stop(self, _):
         with self._lock:
             self._current_rpm = 0.0
         self.get_logger().info(f"[{self._motor_id}] Stopping (simulated)")
-
-        def _delayed_idle():
-            self._publish_status("idle")
-
-        threading.Timer(self._spin_down_time, _delayed_idle).start()
+        threading.Timer(self._spin_down_time, lambda: self._publish_status("idle")).start()
 
     def _on_step(self, _):
-        """Conveyor: advance one tray, publish 'stepping' then 'idle' after step_time_s."""
-        self.get_logger().info(f"[{self._motor_id}] Step command — advancing one tray (simulated {self._step_time}s)")
+        """Conveyor: advance one tray, then return to idle after step_time_s."""
+        self.get_logger().info(
+            f"[{self._motor_id}] Step command — advancing one tray "
+            f"(simulated {self._step_time}s)"
+        )
         self._publish_status("stepping")
         threading.Timer(self._step_time, lambda: self._publish_status("idle")).start()
 
-    # ── Helpers ────────────────────────────────
+    # ── Helpers ────────────────────────────────────────────────────
 
     def _publish_status(self, status: str):
         msg = String()
@@ -97,7 +103,7 @@ class RotaryMotorStubNode(Node):
 
 def main():
     rclpy.init()
-    node = RotaryMotorStubNode()
+    node = MotorStubNode()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

@@ -1,158 +1,279 @@
-import os
-import re
-import time
+"""
+DR28T linear motor driver — MEXE02 serial protocol over USB.
+
+Protocol overview
+─────────────────
+The AZD-KEP driver communicates over a virtual serial port (USB, appears as
+COMx on Windows or /dev/ttyACM0 on Linux).  Commands are binary frames
+reverse-engineered from MEXE02 software captures.  The frame bytes are
+hardcoded as Python constants below; only the target position and speed values
+are patched at known byte offsets before each transmission.
+
+Motion sequence (absolute move)
+────────────────────────────────
+1. Sync byte   (0x06)             – handshake before bulk register-write
+2. Position frame (320 bytes)     – loads target position into data slot 0
+3. Speed frame    (240 bytes)     – loads operating speed into data slot 0
+4. Sync byte   (0x06)             – handshake before execute block
+5. Execute frame 1 (40 bytes)     – triggers motion start
+6. Execute frame 2 (40 bytes)     – confirms motion trigger
+
+Homing sequence (ZHOME)
+────────────────────────
+1. Sync byte   (0x06)
+2. Home frame 1 (40 bytes)
+3. Home frame 2 (40 bytes)
+
+Value encoding
+──────────────
+Position : int32 little-endian in µm (micrometres)
+           Baseline 25 000 µm = 25 mm → bytes [0xa8, 0x61, 0x00, 0x00]
+           Located at frame offset 130.
+
+Speed    : int32 little-endian in µm/s
+           Baseline 1 000 µm/s = 1 mm/s → bytes [0xe8, 0x03, 0x00, 0x00]
+           Low word (bytes 0-1) at frame offset 142.
+           High word (bytes 2-3) at frame offset 144.
+
+Checksum update
+───────────────
+Each frame contains XOR checksum bytes at fixed offsets.  When a data value
+changes, every affected checksum is updated in-place using the XOR delta:
+
+    delta        = XOR(baseline_bytes) ^ XOR(new_bytes)
+    new_checksum = old_checksum ^ delta
+
+This is mathematically equivalent to recomputing the checksum from scratch
+but requires only the bytes that changed.
+"""
+
+import struct
 import threading
-import serial
+import time
+from typing import List
 
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float32MultiArray, Empty, String
-from ament_index_python.packages import get_package_share_directory
+import serial
 
 
-# ──────────────────────────────────────────────
-# Data file helpers
-# ──────────────────────────────────────────────
+# ── Protocol frame constants ───────────────────────────────────────────────────
+#
+# All frames were captured from MEXE02 v4 communicating with an AZD-KEP driver
+# over COM3 (19200 baud, 8E1).  Do not edit the bytes unless re-capturing from
+# MEXE02 with updated driver firmware.
 
-def _data_path(filename: str) -> str:
-    """Return the absolute path to a data file installed with this package."""
-    share_dir = get_package_share_directory("motor_controller")
-    return os.path.join(share_dir, "data", filename)
+_SYNC = bytes([0x06])  # ENQ byte — driver acknowledges with 0x86
+
+# ── Position frame (320 bytes) ────────────────────────────────────────────────
+# Bulk register-write that loads operating parameters for data slot 0.
+# Position value (int32 LE, µm) lives at byte offset _POS_OFFSET.
+# Three XOR checksum bytes are at offsets listed in _POS_CS_IDX.
+_POS_FRAME = bytes([
+    0xff,0x01,0x00,0x00,0xfc,0x00,0xc3,0x01,0x00,0x2a,0x02,0x00,0x00,0x00,0x20,0x2a,  # 000–015
+    0x02,0x00,0x00,0x00,0x40,0x2a,0x02,0x00,0x00,0x00,0x60,0x2a,0x02,0x00,0x00,0x00,  # 016–031
+    0x80,0x2a,0x02,0x00,0x00,0x00,0x00,0x68,0xff,0x00,0x00,0x00,0x00,0x00,0xa0,0x2a,  # 032–047
+    0x02,0x00,0x00,0x00,0xc0,0x2a,0x02,0x00,0x00,0x00,0xe0,0x2a,0x02,0x00,0x00,0x00,  # 048–063
+    0x00,0x2b,0x02,0x00,0x00,0x00,0x20,0x2b,0x02,0x00,0x00,0x00,0x00,0x00,0x00,0x77,  # 064–079
+    0xff,0x00,0x00,0x00,0x40,0x2b,0x02,0x00,0x00,0x00,0x60,0x2b,0x02,0x00,0x00,0x00,  # 080–095
+    0x80,0x2b,0x02,0x00,0x00,0x00,0xa0,0x2b,0x02,0x00,0x00,0x00,0xc0,0x2b,0x02,0x00,  # 096–111
+    0x00,0x00,0xe0,0x2b,0x00,0x00,0x00,0xdd,0xff,0x00,0x00,0x00,0x02,0x00,0x00,0x00,  # 112–127
+    0x01,0x0c,0xa8,0x61,0x00,0x00,0x21,0x0c,0x00,0x00,0x00,0x00,0x41,0x0c,0x00,0x00,  # 128–143  ← pos int32 at [130:134]
+    0x00,0x00,0x61,0x0c,0x00,0x00,0x00,0x00,0x81,0x0c,0x00,0x00,0x00,0x00,0x00,0xb9,  # 144–159  ← checksum [159]
+    0xff,0x00,0x00,0x00,0x00,0x00,0xa1,0x0c,0x00,0x00,0x00,0x00,0xc1,0x0c,0x00,0x00,  # 160–175
+    0x00,0x00,0xe1,0x0c,0x00,0x00,0x00,0x00,0x01,0x0d,0x00,0x00,0x00,0x00,0x21,0x0d,  # 176–191
+    0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x52,0xff,0x00,0x00,0x00,0x41,0x0d,0x00,0x00,  # 192–207
+    0x00,0x00,0x61,0x0d,0x00,0x00,0x00,0x00,0x81,0x0d,0x00,0x00,0x00,0x00,0xa1,0x0d,  # 208–223
+    0x00,0x00,0x00,0x00,0xc1,0x0d,0x00,0x00,0x00,0x00,0xe1,0x0d,0x00,0x00,0x00,0xdf,  # 224–239
+    0xff,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x01,0x0e,0x00,0x00,0x00,0x00,0x21,0x0e,  # 240–255
+    0x00,0x00,0x00,0x00,0x41,0x0e,0x00,0x00,0x00,0x00,0x61,0x0e,0x00,0x00,0x00,0x00,  # 256–271
+    0x81,0x0e,0x00,0x00,0x00,0x00,0x00,0x70,0xff,0x02,0x00,0x00,0x00,0x00,0xa1,0x0e,  # 272–287
+    0x00,0x00,0x00,0x00,0xc1,0x0e,0x00,0x00,0x00,0x00,0xe1,0x0e,0x00,0x00,0x00,0x00,  # 288–303
+    0x01,0x0f,0x00,0x00,0x00,0x00,0x00,0xf9,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x85,  # 304–319  ← checksums [311],[319]
+])
+assert len(_POS_FRAME) == 320, "Position frame length mismatch"
+
+_POS_OFFSET   = 130             # byte index of int32 position value
+_POS_BASE_UM  = 25_000          # µm encoded in the baseline frame (= 25 mm)
+_POS_CS_IDX   = (159, 311, 319) # indices of the three XOR checksum bytes
 
 
-# ──────────────────────────────────────────────
-# Helper functions (ported from playback2.py)
-# ──────────────────────────────────────────────
+# ── Speed frame (240 bytes) ───────────────────────────────────────────────────
+# Bulk register-write that sets the operating speed for data slot 0.
+# Speed value (int32 LE, µm/s) is split: low word at _SPD_LO_IDX,
+# high word at _SPD_HI_IDX.  Three XOR checksums at _SPD_CS_IDX.
+_SPD_FRAME = bytes([
+    0xff,0x01,0x00,0x00,0xba,0x00,0xc3,0x01,0xc1,0x29,0x00,0x00,0x00,0x00,0xe1,0x29,  # 000–015
+    0x00,0x00,0x00,0x00,0x01,0x2a,0x00,0x00,0x00,0x00,0x21,0x2a,0x00,0x00,0x00,0x00,  # 016–031
+    0x41,0x2a,0x00,0x00,0x00,0x00,0x00,0xed,0xff,0x00,0x00,0x00,0x00,0x00,0x61,0x2a,  # 032–047
+    0x00,0x00,0x00,0x00,0x81,0x2a,0x00,0x00,0x00,0x00,0xa1,0x2a,0x00,0x00,0x00,0x00,  # 048–063
+    0xc1,0x2a,0x00,0x00,0x00,0x00,0xe1,0x2a,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xb4,  # 064–079
+    0xff,0x00,0x00,0x00,0x01,0x2b,0x00,0x00,0x00,0x00,0x21,0x2b,0x00,0x00,0x00,0x00,  # 080–095
+    0x41,0x2b,0x00,0x00,0x00,0x00,0x61,0x2b,0x00,0x00,0x00,0x00,0x81,0x2b,0x00,0x00,  # 096–111
+    0x00,0x00,0xa1,0x2b,0x00,0x00,0x00,0xdf,0xff,0x00,0x00,0x00,0x00,0x00,0x00,0x00,  # 112–127
+    0xc1,0x2b,0x00,0x00,0x00,0x00,0xe1,0x2b,0x00,0x00,0x00,0x00,0x02,0x0c,0xe8,0x03,  # 128–143  ← speed[0:2] at [142:144]
+    0x00,0x00,0x22,0x0c,0xe8,0x03,0x00,0x00,0x42,0x0c,0xe8,0x03,0x00,0x00,0x00,0x5a,  # 144–159  ← speed[2:4] at [144:146], cs [159]
+    0xff,0x00,0x00,0x00,0x00,0x00,0x62,0x0c,0xe8,0x03,0x00,0x00,0x82,0x0c,0xe8,0x03,  # 160–175
+    0x00,0x00,0xa2,0x0c,0xe8,0x03,0x00,0x00,0xc2,0x0c,0xe8,0x03,0x00,0x00,0xe2,0x0c,  # 176–191
+    0xe8,0x03,0x00,0x00,0x00,0x00,0x00,0x7a,0xff,0x02,0x00,0x00,0x02,0x0d,0xe8,0x03,  # 192–207
+    0x00,0x00,0x22,0x0d,0xe8,0x03,0x00,0x00,0x42,0x0d,0xe8,0x03,0x00,0x00,0x62,0x0d,  # 208–223
+    0xe8,0x03,0x00,0x00,0x00,0x58,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xa5,  # 224–239  ← checksums [229],[239]
+])
+assert len(_SPD_FRAME) == 240, "Speed frame length mismatch"
 
-def create_combined_html(target_position_mm, target_speed_mms):
-    # ==========================================
-    # 1. POSITION CALCULATION (Baseline: 25mm)
-    # ==========================================
-    pos_base = [0xa8, 0x61, 0x00, 0x00]
-    pos_base_cs = [0xb9, 0xf9, 0x85]
+_SPD_LO_IDX   = 142            # byte index of int32 speed low word (bytes 0-1)
+_SPD_HI_IDX   = 144            # byte index of int32 speed high word (bytes 2-3)
+_SPD_BASE_UMS = 1_000          # µm/s encoded in the baseline frame (= 1 mm/s)
+_SPD_CS_IDX   = (159, 229, 239)
 
-    pos_um = int(target_position_mm * 1000)
-    pos_target = [
-        (pos_um & 0xFF), ((pos_um >> 8) & 0xFF),
-        ((pos_um >> 16) & 0xFF), ((pos_um >> 24) & 0xFF)
+
+# ── Execute frames (40 bytes each) ────────────────────────────────────────────
+# Sent after the position/speed frames to trigger the loaded motion.
+_EXEC_FRAMES: tuple[bytes, ...] = (
+    bytes([
+        0xff,0x03,0x00,0x00,0x0c,0x00,0x83,0x00,0x82,0x01,0x01,0x00,0x00,0x00,0x00,0x0d,
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xfc,
+    ]),
+    bytes([
+        0xff,0x03,0x00,0x00,0x0c,0x00,0x83,0x00,0x9b,0x01,0x00,0x00,0x00,0x00,0x00,0x15,
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xfc,
+    ]),
+)
+
+# ── Home frames (40 bytes each) ───────────────────────────────────────────────
+# Sent to initiate the ZHOME (return-to-origin) sequence.
+_HOME_FRAMES: tuple[bytes, ...] = (
+    bytes([
+        0xff,0x03,0x00,0x00,0x0c,0x00,0x83,0x00,0x82,0x01,0x01,0x00,0x00,0x00,0x00,0x0d,
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xfc,
+    ]),
+    bytes([
+        0xff,0x03,0x00,0x00,0x0c,0x00,0x83,0x00,0x9c,0x01,0x01,0x00,0x00,0x00,0x00,0x13,
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,
+        0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xfc,
+    ]),
+)
+
+# Frame repeated by the heartbeat thread to keep the driver alive.
+_HEARTBEAT_FRAME: bytes = _EXEC_FRAMES[0]
+
+
+# ── Frame builders ─────────────────────────────────────────────────────────────
+
+def _xor_of(data: bytes) -> int:
+    """Return the XOR of every byte in *data*."""
+    result = 0
+    for b in data:
+        result ^= b
+    return result
+
+
+def _build_position_frame(position_mm: float) -> bytes:
+    """
+    Return a patched copy of *_POS_FRAME* encoding *position_mm*.
+
+    Args:
+        position_mm: Target absolute position in millimetres.
+
+    Returns:
+        320-byte frame with updated position value and checksums.
+    """
+    pos_um     = int(round(position_mm * 1_000))
+    new_bytes  = struct.pack("<i", pos_um)
+    base_bytes = struct.pack("<i", _POS_BASE_UM)
+    xor_delta  = _xor_of(base_bytes) ^ _xor_of(new_bytes)
+
+    frame = bytearray(_POS_FRAME)
+    frame[_POS_OFFSET : _POS_OFFSET + 4] = new_bytes
+    for idx in _POS_CS_IDX:
+        frame[idx] ^= xor_delta
+    return bytes(frame)
+
+
+def _build_speed_frame(speed_mms: float) -> bytes:
+    """
+    Return a patched copy of *_SPD_FRAME* encoding *speed_mms*.
+
+    The int32 speed value is split across two non-contiguous 2-byte fields
+    (low word at _SPD_LO_IDX, high word at _SPD_HI_IDX).
+
+    Args:
+        speed_mms: Operating speed in mm/s (must be > 0).
+
+    Returns:
+        240-byte frame with updated speed value and checksums.
+    """
+    spd_ums    = int(round(speed_mms * 1_000))
+    new_bytes  = struct.pack("<i", spd_ums)
+    base_bytes = struct.pack("<i", _SPD_BASE_UMS)
+    xor_delta  = _xor_of(base_bytes) ^ _xor_of(new_bytes)
+
+    frame = bytearray(_SPD_FRAME)
+    frame[_SPD_LO_IDX : _SPD_LO_IDX + 2] = new_bytes[0:2]
+    frame[_SPD_HI_IDX : _SPD_HI_IDX + 2] = new_bytes[2:4]
+    for idx in _SPD_CS_IDX:
+        frame[idx] ^= xor_delta
+    return bytes(frame)
+
+
+def _move_payloads(position_mm: float, speed_mms: float) -> List[bytes]:
+    """Return the ordered frame sequence for an absolute move command."""
+    return [
+        _SYNC,
+        _build_position_frame(position_mm),
+        _build_speed_frame(speed_mms),
+        _SYNC,
+        *_EXEC_FRAMES,
     ]
 
-    pos_mask = (pos_base[0] ^ pos_base[1] ^ pos_base[2] ^ pos_base[3]) ^ \
-               (pos_target[0] ^ pos_target[1] ^ pos_target[2] ^ pos_target[3])
-    pos_cs = [cs ^ pos_mask for cs in pos_base_cs]
 
-    try:
-        with open(_data_path("write25mm.html"), "r", encoding="latin-1") as f:
-            pos_html = f.read()
-
-        pos_html = pos_html.replace(
-            "01 0c a8 61 00 00",
-            f"01 0c {pos_target[0]:02x} {pos_target[1]:02x} {pos_target[2]:02x} {pos_target[3]:02x}"
-        )
-        pos_html = pos_html.replace("81 0c 00 00 00 00 00 b9", f"81 0c 00 00 00 00 00 {pos_cs[0]:02x}")
-        pos_html = pos_html.replace(
-            "01 0f 00 00 00 00 00 f9 00 00 00 00 00 00 00 85",
-            f"01 0f 00 00 00 00 00 {pos_cs[1]:02x} 00 00 00 00 00 00 00 {pos_cs[2]:02x}"
-        )
-    except FileNotFoundError:
-        return None
-
-    # ==========================================
-    # 2. SPEED CALCULATION (Baseline: 1 mm/s)
-    # ==========================================
-    spd_base = [0xe8, 0x03, 0x00, 0x00]
-    spd_base_cs = [0x5a, 0x58, 0xa5]
-
-    spd_um = int(target_speed_mms * 1000)
-    spd_target = [
-        (spd_um & 0xFF), ((spd_um >> 8) & 0xFF),
-        ((spd_um >> 16) & 0xFF), ((spd_um >> 24) & 0xFF)
-    ]
-
-    spd_mask = (spd_base[0] ^ spd_base[1] ^ spd_base[2] ^ spd_base[3]) ^ \
-               (spd_target[0] ^ spd_target[1] ^ spd_target[2] ^ spd_target[3])
-    spd_cs = [cs ^ spd_mask for cs in spd_base_cs]
-
-    try:
-        with open(_data_path("1mms.html"), "r", encoding="latin-1") as f:
-            spd_html = f.read()
-
-        spd_html = spd_html.replace("02 0c e8 03", f"02 0c {spd_target[0]:02x} {spd_target[1]:02x}")
-        spd_html = spd_html.replace("00 00 22 0c e8 03", f"{spd_target[2]:02x} {spd_target[3]:02x} 22 0c e8 03")
-        spd_html = spd_html.replace("42 0c e8 03 00 00 00 5a", f"42 0c e8 03 00 00 00 {spd_cs[0]:02x}")
-        spd_html = spd_html.replace(
-            "e8 03 00 00 00 58 00 00 00 00 00 00 00 00 00 a5",
-            f"e8 03 00 00 00 {spd_cs[1]:02x} 00 00 00 00 00 00 00 00 00 {spd_cs[2]:02x}"
-        )
-    except FileNotFoundError:
-        return None
-
-    # ==========================================
-    # 3. COMBINE FILES
-    # ==========================================
-    spd_table_content = spd_html.split("<table>")[1].split("</table>")[0]
-
-    marker = "Written data (COM3)"
-    first_idx = spd_table_content.find(marker)
-    second_idx = spd_table_content.find(marker, first_idx + 1)
-
-    if second_idx != -1:
-        tr_start = spd_table_content.rfind("<tr", 0, second_idx)
-        spd_table_content = spd_table_content[tr_start:]
-
-    divider = '\n<tr class="s3"><td colspan="2"><br/><b>--- SPEED COMMAND START ---</b><br/></td></tr>\n'
-    combined_html = pos_html.replace("</table>", divider + spd_table_content + "\n</table>")
-
-    return combined_html
+def _home_payloads() -> List[bytes]:
+    """Return the ordered frame sequence for a ZHOME homing command."""
+    return [_SYNC, *_HOME_FRAMES]
 
 
-def parse_html_content(html_content):
-    """Parses MEXE02 HTML text and extracts all written hex payloads into bytearrays."""
-    payloads = []
-    current_payload = bytearray()
-    lines = html_content.splitlines()
-
-    for line in lines:
-        if "Written data" in line:
-            if current_payload:
-                payloads.append(current_payload)
-                current_payload = bytearray()
-        elif 'class="s1"' in line and '<pre>' in line:
-            match = re.search(r'<pre>(.*?)</pre>', line)
-            if match:
-                pre_text = match.group(1)
-                hex_part = pre_text[:48]
-                for b in hex_part.split():
-                    if len(b) == 2:
-                        try:
-                            current_payload.append(int(b, 16))
-                        except ValueError:
-                            pass
-
-    if current_payload:
-        payloads.append(current_payload)
-
-    return payloads
-
-
-# ──────────────────────────────────────────────
-# ROS2 Node
-# ──────────────────────────────────────────────
+# ── ROS2 Node ──────────────────────────────────────────────────────────────────
 
 class MotorControllerNode(Node):
+    """
+    ROS2 node for one DR28T linear axis via MEXE02 serial protocol.
 
-    def __init__(self):
+    Parameters (ROS2)
+    ─────────────────
+    com_port             : str   Serial device path   (default: /dev/ttyACM0)
+    baudrate             : int   Baud rate            (default: 19200)
+    serial_timeout       : float Read timeout (s)     (default: 0.5)
+    serial_write_timeout : float Write timeout (s)    (default: 0.5)
+    max_position_mm      : float Software travel limit (default: 29.0)
+    frame_delay          : float Delay between frames (default: 0.1 s)
+    heartbeat_interval   : float Heartbeat period (s) (default: 0.2)
+    motor_id             : str   Label for log output (default: "motor")
+
+    Subscriptions
+    ─────────────
+    ~/motor_cmd   [Float32MultiArray]  data[0]=position_mm, data[1]=speed_mms
+    ~/motor_home  [Empty]              trigger ZHOME homing sequence
+
+    Publications
+    ────────────
+    ~/motor_status [String]  "idle" | "busy" | "running" | "error"
+    """
+
+    def __init__(self) -> None:
         super().__init__("motor_controller")
 
-        # ── Declare ROS2 parameters (hardcoded defaults) ──
-        self.declare_parameter("com_port",            "/dev/ttyACM0")
-        self.declare_parameter("baudrate",            19200)
-        self.declare_parameter("serial_timeout",      0.5)
-        self.declare_parameter("serial_write_timeout",0.5)
-        self.declare_parameter("max_position_mm",     29.0)
-        self.declare_parameter("frame_delay",         0.1)
-        self.declare_parameter("heartbeat_interval",  0.2)
-        self.declare_parameter("motor_id",            "motor")
+        self.declare_parameter("com_port",             "/dev/ttyACM0")
+        self.declare_parameter("baudrate",             19200)
+        self.declare_parameter("serial_timeout",       0.5)
+        self.declare_parameter("serial_write_timeout", 0.5)
+        self.declare_parameter("max_position_mm",      29.0)
+        self.declare_parameter("frame_delay",          0.1)
+        self.declare_parameter("heartbeat_interval",   0.2)
+        self.declare_parameter("motor_id",             "motor")
 
         com_port             = self.get_parameter("com_port").value
         baudrate             = self.get_parameter("baudrate").value
@@ -163,11 +284,10 @@ class MotorControllerNode(Node):
         self._hb_interval    = self.get_parameter("heartbeat_interval").value
         self._motor_id       = self.get_parameter("motor_id").value
 
-        self._serial_lock = threading.Lock()
-        self._stop_event = threading.Event()
-        self._heartbeat_thread = None
+        self._serial_lock      = threading.Lock()
+        self._stop_hb          = threading.Event()
+        self._heartbeat_thread: threading.Thread | None = None
 
-        # Open serial port once for the lifetime of the node
         try:
             self._ser = serial.Serial(
                 port=com_port,
@@ -178,147 +298,138 @@ class MotorControllerNode(Node):
                 timeout=serial_timeout,
                 write_timeout=serial_write_timeout,
             )
-            self.get_logger().info(f"[{self._motor_id}] Opened {com_port} successfully.")
-        except serial.SerialException as e:
-            self.get_logger().fatal(f"[{self._motor_id}] Failed to open {com_port}: {e}")
+            self.get_logger().info(f"[{self._motor_id}] Serial port {com_port} opened.")
+        except serial.SerialException as exc:
+            self.get_logger().fatal(f"[{self._motor_id}] Cannot open {com_port}: {exc}")
             raise
 
-        self.create_subscription(Float32MultiArray, "motor_cmd", self._cmd_callback, 10)
-        self.create_subscription(Empty, "motor_home", self._home_callback, 10)
+        self.create_subscription(Float32MultiArray, "motor_cmd",  self._on_cmd,  10)
+        self.create_subscription(Empty,             "motor_home", self._on_home, 10)
         self._status_pub = self.create_publisher(String, "motor_status", 10)
         self._publish_status("idle")
-
         self.get_logger().info(
-            "Motor controller node ready.\n"
-            "  /motor_cmd  [Float32MultiArray]  data[0]=position_mm, data[1]=speed_mms\n"
-            "  /motor_home [Empty]              trigger homing sequence"
+            f"[{self._motor_id}] Motor controller ready — "
+            "subscribe to ~/motor_cmd or publish to ~/motor_home."
         )
 
-    # ── Callbacks ──────────────────────────────
+    # ── Subscription callbacks ─────────────────────────────────────────────
 
-    def _cmd_callback(self, msg: Float32MultiArray):
+    def _on_cmd(self, msg: Float32MultiArray) -> None:
         if len(msg.data) < 2:
-            self.get_logger().error("Expected data[0]=position_mm, data[1]=speed_mms — ignoring.")
+            self.get_logger().error(
+                "motor_cmd: expected Float32MultiArray with "
+                "data[0]=position_mm and data[1]=speed_mms."
+            )
             return
 
-        pos_mm = float(msg.data[0])
+        pos_mm  = float(msg.data[0])
         spd_mms = float(msg.data[1])
 
         if not (0.0 <= pos_mm <= self._max_pos):
-            self.get_logger().error(f"Position {pos_mm} mm out of range [0, {self._max_pos}] — ignoring.")
+            self.get_logger().error(
+                f"Position {pos_mm:.2f} mm is outside the allowed range "
+                f"[0, {self._max_pos}] mm — command ignored."
+            )
             return
         if spd_mms <= 0.0:
-            self.get_logger().error(f"Speed must be > 0 mm/s — ignoring.")
+            self.get_logger().error("Speed must be > 0 mm/s — command ignored.")
             return
 
-        self.get_logger().info(f"Received command: pos={pos_mm} mm, speed={spd_mms} mm/s")
+        self.get_logger().info(
+            f"[{self._motor_id}] Move → {pos_mm:.2f} mm @ {spd_mms:.2f} mm/s"
+        )
+        self._execute(_move_payloads(pos_mm, spd_mms))
 
-        config_html = create_combined_html(pos_mm, spd_mms)
-        if config_html is None:
-            self.get_logger().error("Failed to generate HTML — check that write25mm.html and 1mms.html exist in the package share data/.")
-            self._publish_status("error")
-            return
+    def _on_home(self, _msg: Empty) -> None:
+        self.get_logger().info(f"[{self._motor_id}] Homing (ZHOME)…")
+        self._execute(_home_payloads())
 
-        payloads = parse_html_content(config_html)
+    # ── Status publisher ───────────────────────────────────────────────────
 
-        try:
-            with open(_data_path("start_run.html"), "r", encoding="latin-1", errors="ignore") as f:
-                payloads.extend(parse_html_content(f.read()))
-        except FileNotFoundError:
-            self.get_logger().warn("start_run.html not found — motor configured but will NOT execute motion.")
-
-        self._execute_command(payloads)
-
-    def _home_callback(self, _msg: Empty):
-        self.get_logger().info("Homing command received.")
-        try:
-            with open(_data_path("2home.html"), "r", encoding="latin-1", errors="ignore") as f:
-                payloads = parse_html_content(f.read())
-        except FileNotFoundError:
-            self.get_logger().error("2home.html not found — cannot home.")
-            self._publish_status("error")
-            return
-
-        self._execute_command(payloads)
-
-    # ── Status ─────────────────────────────────
-
-    def _publish_status(self, status: str):
+    def _publish_status(self, status: str) -> None:
         msg = String()
         msg.data = status
         self._status_pub.publish(msg)
-        self.get_logger().info(f"Motor status: {status}")
 
-    # ── Execution & Heartbeat ──────────────────
+    # ── Serial I/O ─────────────────────────────────────────────────────────
 
-    def _execute_command(self, payloads):
-        """Stop current heartbeat, send payloads, restart heartbeat."""
+    def _send_payloads(self, payloads: List[bytes]) -> None:
+        """Write each frame in *payloads* to the serial port sequentially."""
+        with self._serial_lock:
+            for i, frame in enumerate(payloads):
+                self.get_logger().debug(
+                    f"[{self._motor_id}] TX [{i+1}/{len(payloads)}] {frame.hex(' ')}"
+                )
+                self._ser.write(frame)
+                time.sleep(self._frame_delay)
+                if self._ser.in_waiting:
+                    resp = self._ser.read(self._ser.in_waiting)
+                    self.get_logger().debug(
+                        f"[{self._motor_id}] RX {resp.hex(' ')}"
+                    )
+
+    # ── Command execution and heartbeat ────────────────────────────────────
+
+    def _execute(self, payloads: List[bytes]) -> None:
+        """Stop any running heartbeat, send *payloads*, then restart heartbeat."""
         self._stop_heartbeat()
         self._publish_status("busy")
-
-        ping_command = None
-        with self._serial_lock:
-            self.get_logger().info(f"Sending {len(payloads)} frames...")
-            for i, payload in enumerate(payloads):
-                self.get_logger().info(f"[Frame {i+1}/{len(payloads)}] {payload.hex(' ')}")
-                self._ser.write(payload)
-                time.sleep(self._frame_delay)
-                if self._ser.in_waiting > 0:
-                    resp = self._ser.read(self._ser.in_waiting)
-                    self.get_logger().info(f"  Response: {resp.hex(' ')}")
-
-                if ping_command is None and len(payload) > 1 and payload[1] == 0x03:
-                    ping_command = payload
-
-        if ping_command is None and payloads:
-            ping_command = payloads[0]
-
-        self.get_logger().info("All frames sent. Starting heartbeat...")
-        self._start_heartbeat(ping_command)
+        self._send_payloads(payloads)
+        self.get_logger().info(
+            f"[{self._motor_id}] All frames sent — heartbeat running."
+        )
+        self._start_heartbeat()
         self._publish_status("running")
 
-    def _start_heartbeat(self, ping_command):
-        self._stop_event.clear()
+    def _start_heartbeat(self) -> None:
+        self._stop_hb.clear()
         self._heartbeat_thread = threading.Thread(
-            target=self._run_heartbeat, args=(ping_command,), daemon=True
+            target=self._heartbeat_loop,
+            daemon=True,
+            name=f"hb-{self._motor_id}",
         )
         self._heartbeat_thread.start()
 
-    def _stop_heartbeat(self):
+    def _stop_heartbeat(self) -> None:
         if self._heartbeat_thread and self._heartbeat_thread.is_alive():
-            self._stop_event.set()
+            self._stop_hb.set()
             self._heartbeat_thread.join(timeout=2.0)
+        self._heartbeat_thread = None
 
-    def _run_heartbeat(self, ping_command):
-        ping_count = 0
-        while not self._stop_event.is_set():
-            if ping_command:
-                with self._serial_lock:
-                    try:
-                        self._ser.write(ping_command)
-                    except serial.SerialException:
-                        break
-                ping_count += 1
-                if ping_count % 5 == 0:
-                    self.get_logger().info(f"Motor alive... {ping_count} pings sent.", throttle_duration_sec=1.0)
-            self._stop_event.wait(timeout=self._hb_interval)
+    def _heartbeat_loop(self) -> None:
+        """Send _HEARTBEAT_FRAME at regular intervals to keep the driver active."""
+        count = 0
+        while not self._stop_hb.is_set():
+            with self._serial_lock:
+                try:
+                    self._ser.write(_HEARTBEAT_FRAME)
+                except serial.SerialException as exc:
+                    self.get_logger().error(
+                        f"[{self._motor_id}] Heartbeat serial error: {exc}"
+                    )
+                    break
+            count += 1
+            if count % 25 == 0:
+                self.get_logger().info(
+                    f"[{self._motor_id}] Motor alive ({count} heartbeats).",
+                    throttle_duration_sec=5.0,
+                )
+            self._stop_hb.wait(timeout=self._hb_interval)
 
-    # ── Cleanup ────────────────────────────────
+    # ── Lifecycle ──────────────────────────────────────────────────────────
 
-    def destroy_node(self):
-        self.get_logger().info("Shutting down — stopping heartbeat and closing serial port.")
+    def destroy_node(self) -> None:
         self._stop_heartbeat()
         self._publish_status("idle")
         if self._ser and self._ser.is_open:
             self._ser.close()
+        self.get_logger().info(f"[{self._motor_id}] Shutdown complete.")
         super().destroy_node()
 
 
-# ──────────────────────────────────────────────
-# Entry point
-# ──────────────────────────────────────────────
+# ── Entry point ────────────────────────────────────────────────────────────────
 
-def main():
+def main() -> None:
     rclpy.init()
     node = MotorControllerNode()
     try:

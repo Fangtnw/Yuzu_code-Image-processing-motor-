@@ -1,5 +1,4 @@
 from setuptools import find_packages, setup
-import os
 from glob import glob
 
 package_name = "motor_controller"
@@ -11,7 +10,6 @@ setup(
     data_files=[
         ("share/ament_index/resource_index/packages", ["resource/motor_controller"]),
         (f"share/{package_name}", ["package.xml"]),
-        (f"share/{package_name}/data", glob("data/*.html")),
         (f"share/{package_name}/launch", glob("launch/*.py")),
     ],
     install_requires=["setuptools"],
@@ -24,8 +22,8 @@ setup(
         "console_scripts": [
             f"motor_controller_node      = {package_name}.motor_controller_node:main",
             f"ethernet_ip_motor_node     = {package_name}.ethernet_ip_motor_node:main",
-            f"rotary_motor_stub_node     = {package_name}.rotary_motor_stub_node:main",
-            f"harvest_sequence_node      = {package_name}.harvest_sequence_node:main",
+            f"peel_sequence_node         = {package_name}.peel_sequence_node:main",
+            f"motor_stub_node            = {package_name}.motor_stub_node:main",
             f"motor_gui                  = {package_name}.motor_gui:main",
         ],
     },

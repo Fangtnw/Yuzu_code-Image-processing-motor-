@@ -106,8 +106,8 @@ def generate_launch_description():
             continue
         nodes.append(Node(
             package="motor_controller",
-            executable="rotary_motor_stub_node",
-            name="rotary_motor_stub_node",
+            executable="motor_stub_node",
+            name="motor_stub_node",
             namespace=m["ns"],
             parameters=[{
                 "motor_id":       m["motor_id"],
@@ -117,11 +117,11 @@ def generate_launch_description():
             output="screen",
         ))
 
-    # ── Harvest sequence orchestrator ──
+    # ── Peel sequence orchestrator ──
     nodes.append(Node(
         package="motor_controller",
-        executable="harvest_sequence_node",
-        name="harvest_sequence",
+        executable="peel_sequence_node",
+        name="peel_sequence",
         output="screen",
     ))
 

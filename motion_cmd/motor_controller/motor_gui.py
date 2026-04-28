@@ -43,7 +43,7 @@ STATUS_COLORS = {
     "done":     "#4caf50",
 }
 
-HARVEST_COLORS = {
+PEEL_COLORS = {
     "idle":          "#9e9e9e",
     "feeding":       "#9c27b0",
     "lowering":      "#ff9800",
@@ -57,7 +57,7 @@ HARVEST_COLORS = {
     "aborted":       "#795548",
 }
 
-HARVEST_STEPS = [
+PEEL_STEPS = [
     "feeding", "lowering", "spinning_up", "peeling",
     "retracting", "spinning_down", "raising",
 ]
@@ -106,15 +106,15 @@ class MotorGuiNode(Node):
         self._step_pub.publish(Empty())
 
 
-class HarvestGuiNode(Node):
-    """Talks to the harvest_sequence_node and listens for yuzu detections."""
+class PeelGuiNode(Node):
+    """Talks to the peel_sequence_node and listens for yuzu detections."""
 
     def __init__(self, status_callback, yuzu_callback):
-        super().__init__("harvest_gui")
-        self._start_pub = self.create_publisher(Empty, "/harvest/start", 10)
-        self._abort_pub = self.create_publisher(Empty, "/harvest/abort", 10)
-        self.create_subscription(String,             "/harvest/status",  lambda m: status_callback(m.data),   10)
-        self.create_subscription(Float32MultiArray,  "/yuzu_detected",   lambda m: yuzu_callback(list(m.data)), 10)
+        super().__init__("peel_gui")
+        self._start_pub = self.create_publisher(Empty, "/peel/start", 10)
+        self._abort_pub = self.create_publisher(Empty, "/peel/abort", 10)
+        self.create_subscription(String,             "/peel/status",   lambda m: status_callback(m.data),    10)
+        self.create_subscription(Float32MultiArray,  "/yuzu_detected", lambda m: yuzu_callback(list(m.data)), 10)
 
     def start(self):
         self._start_pub.publish(Empty())
@@ -294,8 +294,8 @@ class MotorPanel:
 
 # ── Harvest panel ─────────────────────────────────────────────────────────────
 
-class HarvestPanel:
-    def __init__(self, parent: tk.Widget, node: HarvestGuiNode):
+class PeelPanel:
+    def __init__(self, parent: tk.Widget, node: PeelGuiNode):
         self._node  = node
         self._frame = ttk.Frame(parent)
         self._build_ui()
@@ -307,13 +307,13 @@ class HarvestPanel:
     def _build_ui(self):
         pad = {"padx": 12, "pady": 5}
 
-        # ── Harvest status ──
+        # ── Peel sequence status ──
         hf = tk.Frame(self._frame, bg="#212121", pady=8)
         hf.grid(row=0, column=0, columnspan=3, sticky="ew")
-        tk.Label(hf, text="Harvest:", bg="#212121", fg="white",
+        tk.Label(hf, text="Peel:", bg="#212121", fg="white",
                  font=("Helvetica", 10)).pack(side="left", padx=(12, 6))
         self._h_dot = tk.Label(hf, text="●", bg="#212121",
-                                fg=HARVEST_COLORS["idle"], font=("Helvetica", 14))
+                                fg=PEEL_COLORS["idle"], font=("Helvetica", 14))
         self._h_dot.pack(side="left")
         self._h_lbl = tk.Label(hf, text="idle", bg="#212121", fg="white",
                                 font=("Helvetica", 10, "bold"), width=14, anchor="w")
@@ -332,7 +332,7 @@ class HarvestPanel:
         pf.grid(row=2, column=0, columnspan=3, sticky="ew", **pad)
         self._step_dots  = {}
         self._step_lbls  = {}
-        for i, step in enumerate(HARVEST_STEPS):
+        for i, step in enumerate(PEEL_STEPS):
             row, col = divmod(i, 4)
             dot = tk.Label(pf, text="○", fg="#9e9e9e", font=("Helvetica", 10))
             dot.grid(row=row, column=col * 2, sticky="w", padx=(4, 2), pady=2)
@@ -345,43 +345,43 @@ class HarvestPanel:
         # ── Control buttons ──
         cf = ttk.LabelFrame(self._frame, text="Control", padding=10)
         cf.grid(row=3, column=0, columnspan=3, sticky="ew", **pad)
-        ttk.Button(cf, text="Start Harvest", command=self._on_start).pack(
+        ttk.Button(cf, text="Start Peel", command=self._on_start).pack(
             side="left", expand=True, fill="x", padx=(0, 6))
         ttk.Button(cf, text="ABORT", command=self._on_abort).pack(
             side="left", expand=True, fill="x")
 
         # ── Log ──
         self._log = _log_widget(self._frame, row=4)
-        _log_print(self._log, "Harvest panel ready.")
-        _log_print(self._log, "Image team: publish /yuzu_detected then /harvest/start")
+        _log_print(self._log, "Peel sequence panel ready.")
+        _log_print(self._log, "Image team: publish /yuzu_detected then /peel/start")
         _log_print(self._log, "  /yuzu_detected  [x_off_mm, y_off_mm, long_mm, short_mm]")
 
     # ── Handlers ──────────────────────────────────────────────────
 
     def _on_start(self):
         self._node.start()
-        _log_print(self._log, ">> /harvest/start")
+        _log_print(self._log, ">> /peel/start")
 
     def _on_abort(self):
         if not messagebox.askyesno("Confirm Abort", "Send ABORT to all motors?"):
             return
         self._node.abort()
-        _log_print(self._log, ">> /harvest/abort")
+        _log_print(self._log, ">> /peel/abort")
 
     # ── Updates (called from ROS thread) ──────────────────────────
 
-    def update_harvest_status(self, status: str, root: tk.Tk):
-        root.after(0, self._apply_harvest_status, status)
+    def update_peel_status(self, status: str, root: tk.Tk):
+        root.after(0, self._apply_peel_status, status)
 
-    def _apply_harvest_status(self, status: str):
-        color = HARVEST_COLORS.get(status, "white")
+    def _apply_peel_status(self, status: str):
+        color = PEEL_COLORS.get(status, "white")
         self._h_dot.config(fg=color)
         self._h_lbl.config(text=status.replace("_", " "))
-        _log_print(self._log, f"<< harvest: {status}")
+        _log_print(self._log, f"<< peel: {status}")
 
         # Highlight current step; tick completed steps
         passed = True
-        for step in HARVEST_STEPS:
+        for step in PEEL_STEPS:
             if step == status:
                 self._step_dots[step].config(text="●", fg="#e91e63")
                 self._step_lbls[step].config(fg="white", font=("Helvetica", 8, "bold"))
@@ -394,7 +394,7 @@ class HarvestPanel:
                 self._step_lbls[step].config(fg="gray", font=("Helvetica", 8))
 
         if status in ("idle", "done", "aborted", "error"):
-            for step in HARVEST_STEPS:
+            for step in PEEL_STEPS:
                 self._step_dots[step].config(text="○", fg="#9e9e9e")
                 self._step_lbls[step].config(fg="gray", font=("Helvetica", 8))
 
@@ -452,24 +452,24 @@ def main():
         panel_ref[0] = panel
         notebook.add(panel.frame, text=cfg["label"])
 
-    # ── Harvest tab ──
-    harvest_ref: list = [None]
+    # ── Peel sequence tab ──
+    peel_ref: list = [None]
 
-    def harvest_status_cb(status):
-        if harvest_ref[0]:
-            harvest_ref[0].update_harvest_status(status, root)
+    def peel_status_cb(status):
+        if peel_ref[0]:
+            peel_ref[0].update_peel_status(status, root)
 
     def yuzu_cb(data):
-        if harvest_ref[0]:
-            harvest_ref[0].update_yuzu_detected(data, root)
+        if peel_ref[0]:
+            peel_ref[0].update_yuzu_detected(data, root)
 
-    harvest_node = HarvestGuiNode(harvest_status_cb, yuzu_cb)
-    executor.add_node(harvest_node)
-    nodes.append(harvest_node)
+    peel_node = PeelGuiNode(peel_status_cb, yuzu_cb)
+    executor.add_node(peel_node)
+    nodes.append(peel_node)
 
-    harvest_panel = HarvestPanel(notebook, harvest_node)
-    harvest_ref[0] = harvest_panel
-    notebook.add(harvest_panel.frame, text="Harvest")
+    peel_panel = PeelPanel(notebook, peel_node)
+    peel_ref[0] = peel_panel
+    notebook.add(peel_panel.frame, text="Peel Sequence")
 
     # ── Spin all ROS2 nodes in one background thread ──
     spin_thread = threading.Thread(target=executor.spin, daemon=True)

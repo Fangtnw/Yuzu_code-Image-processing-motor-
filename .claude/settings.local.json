@@ -9,7 +9,16 @@
       "WebFetch(domain:www.orientalmotorforum.com)",
       "Bash(python -c \"import reportlab; print\\('ok'\\)\")",
       "Bash(pip install:*)",
-      "Bash(python generate_manual.py)"
+      "Bash(python generate_manual.py)",
+      "WebFetch(domain:sourceforge.net)",
+      "WebFetch(domain:www.orientalmotor-support.eu)",
+      "WebFetch(domain:www.manualslib.com)",
+      "WebFetch(domain:manualzz.com)",
+      "Bash(python -m markitdown \"C:\\\\Users\\\\thana\\\\OneDrive\\\\เอกสาร\\\\Oriental_motor_operation_JP.pptx\")",
+      "Bash(dir /b /a-d)",
+      "Bash(dir /b motion_cmd /a-d)",
+      "Bash(dir /b motion_cmd\\\\motor_controller /a-d)",
+      "Bash(dir /b motion_cmd\\\\data /a-d)"
     ]
   }
 }
