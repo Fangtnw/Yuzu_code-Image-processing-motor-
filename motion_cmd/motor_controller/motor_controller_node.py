@@ -47,6 +47,7 @@ This is mathematically equivalent to recomputing the checksum from scratch
 but requires only the bytes that changed.
 """
 
+import math
 import struct
 import threading
 import time
@@ -236,6 +237,26 @@ def _home_payloads() -> List[bytes]:
     return [_SYNC, *_HOME_FRAMES]
 
 
+def _speed_for_duration(distance_mm: float, duration_s: float, accel_mms2: float) -> float:
+    """Compute the peak speed needed for a symmetric move profile."""
+    if distance_mm <= 0.0:
+        return 0.1
+    if accel_mms2 <= 0.0:
+        return distance_mm / duration_s
+
+    min_time_s = 2.0 * math.sqrt(distance_mm / accel_mms2)
+    if duration_s < min_time_s:
+        raise ValueError(
+            f"Requested duration {duration_s:.3f}s is shorter than the achievable minimum "
+            f"{min_time_s:.3f}s for {distance_mm:.3f} mm at {accel_mms2:.3f} mm/s^2."
+        )
+
+    disc = accel_mms2 * accel_mms2 * duration_s * duration_s - 4.0 * accel_mms2 * distance_mm
+    if disc <= 0.0:
+        return math.sqrt(distance_mm * accel_mms2)
+    return (accel_mms2 * duration_s - math.sqrt(disc)) / 2.0
+
+
 # ── ROS2 Node ──────────────────────────────────────────────────────────────────
 
 class MotorControllerNode(Node):
@@ -255,7 +276,12 @@ class MotorControllerNode(Node):
 
     Subscriptions
     ─────────────
-    ~/motor_cmd   [Float32MultiArray]  data[0]=position_mm, data[1]=speed_mms
+    ~/motor_cmd   [Float32MultiArray]
+                    data[0]=position_mm
+                    data[1]=speed_mms
+                    data[2]=acceleration_mms2   (optional, estimate only on USB)
+                    data[3]=deceleration_mms2   (optional, estimate only on USB)
+                    data[4]=move_time_s         (optional, compute speed from time)
     ~/motor_home  [Empty]              trigger ZHOME homing sequence
 
     Publications
@@ -271,6 +297,8 @@ class MotorControllerNode(Node):
         self.declare_parameter("serial_timeout",       0.5)
         self.declare_parameter("serial_write_timeout", 0.5)
         self.declare_parameter("max_position_mm",      29.0)
+        self.declare_parameter("max_speed_mms",        100.0)
+        self.declare_parameter("default_acceleration_mms2", 50.0)
         self.declare_parameter("frame_delay",          0.1)
         self.declare_parameter("heartbeat_interval",   0.2)
         self.declare_parameter("motor_id",             "motor")
@@ -280,9 +308,13 @@ class MotorControllerNode(Node):
         serial_timeout       = self.get_parameter("serial_timeout").value
         serial_write_timeout = self.get_parameter("serial_write_timeout").value
         self._max_pos        = self.get_parameter("max_position_mm").value
+        self._max_spd        = self.get_parameter("max_speed_mms").value
+        self._default_accel  = self.get_parameter("default_acceleration_mms2").value
         self._frame_delay    = self.get_parameter("frame_delay").value
         self._hb_interval    = self.get_parameter("heartbeat_interval").value
         self._motor_id       = self.get_parameter("motor_id").value
+        self._last_pos_mm    = 0.0
+        self._warned_usb_accel = False
 
         self._serial_lock      = threading.Lock()
         self._stop_hb          = threading.Event()
@@ -303,8 +335,8 @@ class MotorControllerNode(Node):
             self.get_logger().fatal(f"[{self._motor_id}] Cannot open {com_port}: {exc}")
             raise
 
-        self.create_subscription(Float32MultiArray, "motor_cmd",  self._on_cmd,  10)
-        self.create_subscription(Empty,             "motor_home", self._on_home, 10)
+        self.create_subscription(Float32MultiArray, "motor_cmd",  self._on_cmd_v2,  10)
+        self.create_subscription(Empty,             "motor_home", self._on_home_v2, 10)
         self._status_pub = self.create_publisher(String, "motor_status", 10)
         self._publish_status("idle")
         self.get_logger().info(
@@ -313,6 +345,65 @@ class MotorControllerNode(Node):
         )
 
     # ── Subscription callbacks ─────────────────────────────────────────────
+
+    def _on_cmd_v2(self, msg: Float32MultiArray) -> None:
+        if len(msg.data) < 2:
+            self.get_logger().error(
+                "motor_cmd: expected Float32MultiArray with "
+                "data[0]=position_mm and data[1]=speed_mms."
+            )
+            return
+
+        pos_mm = float(msg.data[0])
+        spd_mms = float(msg.data[1])
+        accel_mms2 = float(msg.data[2]) if len(msg.data) >= 3 else self._default_accel
+        decel_mms2 = float(msg.data[3]) if len(msg.data) >= 4 else accel_mms2
+        duration_s = float(msg.data[4]) if len(msg.data) >= 5 else 0.0
+
+        if not (0.0 <= pos_mm <= self._max_pos):
+            self.get_logger().error(
+                f"Position {pos_mm:.2f} mm is outside the allowed range "
+                f"[0, {self._max_pos}] mm - command ignored."
+            )
+            return
+
+        if duration_s > 0.0:
+            try:
+                spd_mms = _speed_for_duration(
+                    distance_mm=abs(pos_mm - self._last_pos_mm),
+                    duration_s=duration_s,
+                    accel_mms2=accel_mms2,
+                )
+            except ValueError as exc:
+                self.get_logger().error(f"[{self._motor_id}] {exc} Command ignored.")
+                return
+
+        if spd_mms <= 0.0 or spd_mms > self._max_spd:
+            self.get_logger().error(
+                f"Speed must be in the range (0, {self._max_spd}] mm/s - command ignored."
+            )
+            return
+
+        if (len(msg.data) >= 3 or len(msg.data) >= 4) and not self._warned_usb_accel:
+            self.get_logger().warning(
+                f"[{self._motor_id}] USB MEXE02 control uses accel/decel only for timing "
+                "math right now; driver-side accel frames are not captured yet."
+            )
+            self._warned_usb_accel = True
+
+        self.get_logger().info(
+            f"[{self._motor_id}] Move -> {pos_mm:.2f} mm @ {spd_mms:.2f} mm/s  "
+            f"(accel={accel_mms2:.2f} mm/s^2  decel={decel_mms2:.2f} mm/s^2"
+            + (f"  time={duration_s:.3f} s" if duration_s > 0.0 else "")
+            + ")"
+        )
+        self._execute(_move_payloads(pos_mm, spd_mms))
+        self._last_pos_mm = pos_mm
+
+    def _on_home_v2(self, _msg: Empty) -> None:
+        self.get_logger().info(f"[{self._motor_id}] Homing (ZHOME)...")
+        self._execute(_home_payloads())
+        self._last_pos_mm = 0.0
 
     def _on_cmd(self, msg: Float32MultiArray) -> None:
         if len(msg.data) < 2:

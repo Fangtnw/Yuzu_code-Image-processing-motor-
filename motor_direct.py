@@ -14,10 +14,25 @@ Usage
 
 Prompt commands
 ───────────────
-    m <pos_mm> <speed_mms>   absolute move  (pos: 0–29 mm, speed: 0.1–100 mm/s)
-    h                        home (ZHOME)
-    s                        show connection / heartbeat status
-    q  (or Ctrl-C)           quit
+    m <pos_mm> <speed_mms> [w | <wait_s>]
+        Absolute move.
+          No 3rd arg  — fire and return immediately (heartbeat keeps motor alive)
+          w           — wait for auto-estimated travel time, then return
+          <number>    — wait exactly that many seconds, then return
+
+    h                 home (ZHOME)
+    dwell <seconds>   pause (no motor command, just waits)
+    set accel <val>   update acceleration assumption used for time estimates
+    s                 show status (port, heartbeat, last command)
+    ?                 show this help
+    q  (or Ctrl-C)    quit
+
+Acceleration note
+─────────────────
+    `set accel` changes the value used for travel-time estimates ONLY.
+    The driver's actual acceleration ramp is set in MEXE02 software.
+    Adding true hardware acceleration control requires capturing a new
+    MEXE02 HTML log with a custom acceleration value — see code comments.
 
 Dependencies
 ────────────
@@ -25,6 +40,7 @@ Dependencies
 """
 
 import argparse
+import math
 import struct
 import sys
 import threading
@@ -41,14 +57,15 @@ def _c(code: str, text: str) -> str:
     """Wrap *text* in an ANSI colour code (silently skipped on plain terminals)."""
     if not sys.stdout.isatty():
         return text
-    codes = {"red": "31", "green": "32", "yellow": "33", "cyan": "36", "gray": "90", "bold": "1"}
+    codes = {"red": "31", "green": "32", "yellow": "33", "cyan": "36",
+             "gray": "90", "bold": "1", "magenta": "35"}
     return f"\033[{codes.get(code, '0')}m{text}\033[0m"
 
 
-def _ok(msg: str)   -> None: print(_c("green",  f"  [✓] {msg}"))
-def _info(msg: str) -> None: print(_c("cyan",   f"  [i] {msg}"))
-def _warn(msg: str) -> None: print(_c("yellow", f"  [!] {msg}"))
-def _err(msg: str)  -> None: print(_c("red",    f"  [✗] {msg}"))
+def _ok(msg: str)   -> None: print(_c("green",   f"  [✓] {msg}"))
+def _info(msg: str) -> None: print(_c("cyan",    f"  [i] {msg}"))
+def _warn(msg: str) -> None: print(_c("yellow",  f"  [!] {msg}"))
+def _err(msg: str)  -> None: print(_c("red",     f"  [✗] {msg}"))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -59,6 +76,8 @@ def _err(msg: str)  -> None: print(_c("red",    f"  [✗] {msg}"))
 _SYNC = bytes([0x06])  # ENQ — driver acknowledges with 0x86
 
 # ── Position frame (320 bytes) ─────────────────────────────────────────────────
+# Bulk register-write for data slot 0.  Position (int32 LE, µm) at offset 130.
+# Checksums (XOR) at offsets 159, 311, 319.
 _POS_FRAME = bytes([
     0xff,0x01,0x00,0x00,0xfc,0x00,0xc3,0x01,0x00,0x2a,0x02,0x00,0x00,0x00,0x20,0x2a,  # 000–015
     0x02,0x00,0x00,0x00,0x40,0x2a,0x02,0x00,0x00,0x00,0x60,0x2a,0x02,0x00,0x00,0x00,  # 016–031
@@ -86,6 +105,10 @@ _POS_BASE_UM = 25_000
 _POS_CS_IDX  = (159, 311, 319)
 
 # ── Speed frame (240 bytes) ────────────────────────────────────────────────────
+# Bulk register-write for operating speed.  Speed (int32 LE, µm/s):
+#   low word  (bytes 0-1) at offset 142
+#   high word (bytes 2-3) at offset 144
+# Checksums (XOR) at offsets 159, 229, 239.
 _SPD_FRAME = bytes([
     0xff,0x01,0x00,0x00,0xba,0x00,0xc3,0x01,0xc1,0x29,0x00,0x00,0x00,0x00,0xe1,0x29,  # 000–015
     0x00,0x00,0x00,0x00,0x01,0x2a,0x00,0x00,0x00,0x00,0x21,0x2a,0x00,0x00,0x00,0x00,  # 016–031
@@ -95,8 +118,8 @@ _SPD_FRAME = bytes([
     0xff,0x00,0x00,0x00,0x01,0x2b,0x00,0x00,0x00,0x00,0x21,0x2b,0x00,0x00,0x00,0x00,  # 080–095
     0x41,0x2b,0x00,0x00,0x00,0x00,0x61,0x2b,0x00,0x00,0x00,0x00,0x81,0x2b,0x00,0x00,  # 096–111
     0x00,0x00,0xa1,0x2b,0x00,0x00,0x00,0xdf,0xff,0x00,0x00,0x00,0x00,0x00,0x00,0x00,  # 112–127
-    0xc1,0x2b,0x00,0x00,0x00,0x00,0xe1,0x2b,0x00,0x00,0x00,0x00,0x02,0x0c,0xe8,0x03,  # 128–143  ← spd[0:2] [142:144]
-    0x00,0x00,0x22,0x0c,0xe8,0x03,0x00,0x00,0x42,0x0c,0xe8,0x03,0x00,0x00,0x00,0x5a,  # 144–159  ← spd[2:4] [144:146], cs [159]
+    0xc1,0x2b,0x00,0x00,0x00,0x00,0xe1,0x2b,0x00,0x00,0x00,0x00,0x02,0x0c,0xe8,0x03,  # 128–143  ← spd[0:2] at [142:144]
+    0x00,0x00,0x22,0x0c,0xe8,0x03,0x00,0x00,0x42,0x0c,0xe8,0x03,0x00,0x00,0x00,0x5a,  # 144–159  ← spd[2:4] at [144:146], cs [159]
     0xff,0x00,0x00,0x00,0x00,0x00,0x62,0x0c,0xe8,0x03,0x00,0x00,0x82,0x0c,0xe8,0x03,  # 160–175
     0x00,0x00,0xa2,0x0c,0xe8,0x03,0x00,0x00,0xc2,0x0c,0xe8,0x03,0x00,0x00,0xe2,0x0c,  # 176–191
     0xe8,0x03,0x00,0x00,0x00,0x00,0x00,0x7a,0xff,0x02,0x00,0x00,0x02,0x0d,0xe8,0x03,  # 192–207
@@ -137,6 +160,27 @@ _HOME_FRAMES = (
 )
 
 _HEARTBEAT_FRAME = _EXEC_FRAMES[0]
+
+# ── Hardware limits ────────────────────────────────────────────────────────────
+MAX_POS_MM  = 29.0
+MAX_SPD_MMS = 100.0
+FRAME_DELAY = 0.10   # seconds between frame writes
+HB_INTERVAL = 0.20   # heartbeat period
+
+# ── Default acceleration assumption for time estimates ─────────────────────────
+# The driver's actual acceleration ramp is configured in MEXE02 and is NOT
+# changed by this script.  This constant is used only for travel-time estimates.
+#
+# TODO — hardware acceleration control:
+#   The AZ series stores acceleration (starting rate) at register 0x0C03 + 0x20*n
+#   and deceleration (stopping rate) at 0x0C04 + 0x20*n — one address step above
+#   the speed register (0x0C02 + 0x20*n).  To add control:
+#   1. In MEXE02, set a specific acceleration value and save the comm log as HTML.
+#   2. Extract the frame bytes from that HTML (same process as for write25mm.html
+#      and 1mms.html).
+#   3. Hardcode the baseline frame + patch offsets here, following the same
+#      XOR-delta checksum pattern used by _build_speed_frame().
+DEFAULT_ACCEL_MMS2 = 50.0   # mm/s² — tune to match your MEXE02 setting
 
 
 # ── Frame builders ─────────────────────────────────────────────────────────────
@@ -182,15 +226,48 @@ def _home_payloads() -> List[bytes]:
     return [_SYNC, *_HOME_FRAMES]
 
 
+# ── Travel time estimation ─────────────────────────────────────────────────────
+
+def _travel_time_s(distance_mm: float, speed_mms: float,
+                   accel_mms2: float = DEFAULT_ACCEL_MMS2) -> float:
+    """
+    Estimate travel time using a symmetric trapezoidal velocity profile.
+
+    Two cases:
+      Triangular  (short move, never reaches peak speed):
+          peak_v = sqrt(distance * accel)
+          t      = 2 * peak_v / accel
+      Trapezoidal (long move, reaches and holds peak speed):
+          t_ramp = speed / accel          (accel + decel phases combined)
+          t_flat = (distance - speed²/accel) / speed
+          t      = t_ramp + t_flat
+
+    Args:
+        distance_mm : Absolute travel distance in mm.
+        speed_mms   : Peak (commanded) speed in mm/s.
+        accel_mms2  : Assumed acceleration in mm/s².
+
+    Returns:
+        Estimated travel time in seconds.
+    """
+    if distance_mm <= 0.0 or speed_mms <= 0.0 or accel_mms2 <= 0.0:
+        return 0.0
+    # Distance covered during both accel and decel phases combined
+    d_ramp = speed_mms ** 2 / accel_mms2
+    if d_ramp >= distance_mm:
+        # Triangular profile — motor never reaches peak speed
+        peak_v = math.sqrt(distance_mm * accel_mms2)
+        return 2.0 * peak_v / accel_mms2
+    else:
+        # Trapezoidal profile
+        t_ramp = speed_mms / accel_mms2
+        t_flat = (distance_mm - d_ramp) / speed_mms
+        return t_ramp + t_flat
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Motor driver (no ROS2)
 # ══════════════════════════════════════════════════════════════════════════════
-
-MAX_POS_MM  = 29.0
-MAX_SPD_MMS = 100.0
-FRAME_DELAY = 0.10   # seconds between consecutive frame writes
-HB_INTERVAL = 0.20   # heartbeat period
-
 
 class MotorDriver:
     """
@@ -198,18 +275,20 @@ class MotorDriver:
 
     Usage:
         driver = MotorDriver.open("/dev/ttyACM0")
-        driver.move(15.0, 10.0)
+        driver.move(15.0, 10.0)              # fire and return immediately
+        driver.move(15.0, 10.0, wait_s=2.5)  # fire and wait 2.5 s
         driver.home()
         driver.close()
     """
 
     def __init__(self, ser: serial.Serial) -> None:
-        self._ser            = ser
-        self._lock           = threading.Lock()
-        self._stop_hb        = threading.Event()
+        self._ser               = ser
+        self._lock              = threading.Lock()
+        self._stop_hb           = threading.Event()
         self._hb_thread: Optional[threading.Thread] = None
-        self._hb_count       = 0
-        self._last_cmd: Optional[str] = None
+        self._hb_count          = 0
+        self._last_pos_mm: Optional[float] = None   # for distance tracking
+        self._last_cmd: Optional[str]       = None
 
     # ── Factory ───────────────────────────────────────────────────────────────
 
@@ -229,23 +308,54 @@ class MotorDriver:
 
     # ── Public commands ───────────────────────────────────────────────────────
 
-    def move(self, pos_mm: float, spd_mms: float) -> None:
-        """Send an absolute move command and restart the heartbeat."""
+    def move(self, pos_mm: float, spd_mms: float,
+             wait_s: Optional[float] = None,
+             accel_mms2: float = DEFAULT_ACCEL_MMS2) -> None:
+        """
+        Send an absolute move command, then optionally wait for completion.
+
+        Args:
+            pos_mm     : Target absolute position in mm.
+            spd_mms    : Operating speed in mm/s.
+            wait_s     : Seconds to wait after sending frames.
+                         None  → return immediately (heartbeat keeps motor alive).
+                         value → block for that many seconds, then return.
+        """
+        distance = abs(pos_mm - (self._last_pos_mm or 0.0))
+        est_s    = _travel_time_s(distance, spd_mms, accel_mms2)
+
         self._last_cmd = f"move pos={pos_mm:.2f} mm  speed={spd_mms:.2f} mm/s"
         self._send(_move_payloads(pos_mm, spd_mms))
+        self._last_pos_mm = pos_mm
+
+        # Show travel time estimate
+        _info(
+            f"Est. travel time: {est_s:.2f} s"
+            f"  (dist={distance:.1f} mm, accel={accel_mms2:.0f} mm/s²)"
+        )
+
+        if wait_s is not None:
+            self._wait_with_bar(wait_s)
 
     def home(self) -> None:
         """Trigger the ZHOME homing sequence."""
-        self._last_cmd = "home (ZHOME)"
+        self._last_cmd    = "home (ZHOME)"
+        self._last_pos_mm = 0.0
         self._send(_home_payloads())
+
+    def wait(self, duration_s: float) -> None:
+        """Block for *duration_s* seconds without sending any command."""
+        self._wait_with_bar(duration_s)
 
     def status(self) -> None:
         """Print current connection and heartbeat status."""
-        port   = self._ser.port
         alive  = self._hb_thread is not None and self._hb_thread.is_alive()
-        hb_str = _c("green", f"running  ({self._hb_count} beats)") if alive else _c("gray", "stopped")
-        _info(f"Port      : {port}")
+        hb_str = (_c("green", f"running  ({self._hb_count} beats)")
+                  if alive else _c("gray", "stopped"))
+        _info(f"Port      : {self._ser.port}")
         _info(f"Heartbeat : {hb_str}")
+        if self._last_pos_mm is not None:
+            _info(f"Last pos  : {self._last_pos_mm:.2f} mm")
         if self._last_cmd:
             _info(f"Last cmd  : {self._last_cmd}")
 
@@ -273,6 +383,30 @@ class MotorDriver:
         _ok(f"{len(payloads)} frames sent in {elapsed:.2f} s")
         self._start_heartbeat()
 
+    def _wait_with_bar(self, duration_s: float) -> None:
+        """Block for *duration_s* showing a live progress bar."""
+        BAR = 30
+        _info(f"Waiting {duration_s:.2f} s …")
+        t_start = time.monotonic()
+        t_end   = t_start + duration_s
+        while True:
+            now     = time.monotonic()
+            elapsed = now - t_start
+            if elapsed >= duration_s:
+                break
+            frac    = min(elapsed / duration_s, 1.0)
+            filled  = int(frac * BAR)
+            bar     = "█" * filled + "░" * (BAR - filled)
+            remain  = duration_s - elapsed
+            print(
+                _c("gray", f"\r  [{bar}] {remain:.1f} s remaining "),
+                end="", flush=True
+            )
+            time.sleep(0.05)
+        # Clear the progress line
+        print(f"\r{' ' * (BAR + 30)}\r", end="", flush=True)
+        _ok(f"Done  (waited {duration_s:.2f} s)")
+
     def _start_heartbeat(self) -> None:
         self._stop_hb.clear()
         self._hb_count  = 0
@@ -280,7 +414,7 @@ class MotorDriver:
             target=self._hb_loop, daemon=True, name="dr28t-heartbeat"
         )
         self._hb_thread.start()
-        _info("Heartbeat running  (motor will stay active)")
+        _info("Heartbeat running  (motor stays active)")
 
     def _stop_heartbeat(self) -> None:
         if self._hb_thread and self._hb_thread.is_alive():
@@ -312,15 +446,11 @@ def _find_port() -> Optional[str]:
     candidates = list(serial.tools.list_ports.comports())
     if not candidates:
         return None
-
-    # Prefer ports whose description / manufacturer contains known keywords
     keywords = ("oriental", "azd", "ttyacm", "ttyusb", "usbserial")
     for p in candidates:
         combined = f"{p.description} {p.manufacturer or ''}".lower()
         if any(k in combined for k in keywords):
             return p.device
-
-    # Fall back: return the first available port and let the user decide
     return candidates[0].device
 
 
@@ -329,16 +459,31 @@ def _find_port() -> Optional[str]:
 # ══════════════════════════════════════════════════════════════════════════════
 
 _HELP = """
-  m <pos_mm> <speed_mms>   absolute move  (pos 0–29 mm, speed 0.1–100 mm/s)
-  h                        home (ZHOME)
-  s                        status
-  ?                        show this help
-  q                        quit
+  m  <pos_mm> <speed_mms>              move to absolute position (fire and return)
+  m  <pos_mm> <speed_mms> w            move and wait for auto-estimated time
+  m  <pos_mm> <speed_mms> <seconds>    move and wait exactly N seconds
+
+  mt <speed_mms> <time_s>              move at speed for time  (positive = forward,
+                                         negative = backward; always waits)
+
+  h                                    home (ZHOME)
+  dwell <seconds>                      pause without moving
+
+  set accel <mm/s²>                    update acceleration for time estimates
+  t <pos_mm> <speed_mms>               show travel time estimate (no move)
+
+  s                                    status (port, heartbeat, last position)
+  ?                                    show this help
+  q  (or Ctrl-C)                       quit
 """
 
 
-def _repl(driver: MotorDriver) -> None:
+def _repl(driver: MotorDriver, accel_mms2: float) -> None:
     print(_HELP)
+    _info(f"Acceleration assumption: {accel_mms2:.0f} mm/s²  "
+          f"(use 'set accel <val>' to update)")
+    print()
+
     while True:
         try:
             raw = input(_c("bold", "dr28t> ")).strip()
@@ -352,15 +497,19 @@ def _repl(driver: MotorDriver) -> None:
         parts = raw.split()
         cmd   = parts[0].lower()
 
+        # ── quit ──
         if cmd in ("q", "quit", "exit"):
             break
 
+        # ── help ──
         elif cmd in ("?", "help"):
             print(_HELP)
 
+        # ── status ──
         elif cmd == "s":
             driver.status()
 
+        # ── home ──
         elif cmd == "h":
             _info("Sending home (ZHOME)…")
             try:
@@ -368,9 +517,62 @@ def _repl(driver: MotorDriver) -> None:
             except serial.SerialException as exc:
                 _err(f"Serial error: {exc}")
 
-        elif cmd == "m":
+        # ── dwell ──
+        elif cmd == "dwell":
+            if len(parts) != 2:
+                _warn("Usage:  dwell <seconds>")
+                continue
+            try:
+                secs = float(parts[1])
+            except ValueError:
+                _warn("Seconds must be a number.")
+                continue
+            if secs <= 0:
+                _warn("Seconds must be > 0.")
+                continue
+            driver.wait(secs)
+
+        # ── travel time estimate (no move) ──
+        elif cmd == "t":
             if len(parts) != 3:
-                _warn("Usage:  m <pos_mm> <speed_mms>")
+                _warn("Usage:  t <pos_mm> <speed_mms>")
+                continue
+            try:
+                pos_mm  = float(parts[1])
+                spd_mms = float(parts[2])
+            except ValueError:
+                _warn("Position and speed must be numbers.")
+                continue
+            distance = abs(pos_mm - (driver._last_pos_mm or 0.0))
+            est_s    = _travel_time_s(distance, spd_mms, accel_mms2)
+            _info(f"Travel time estimate: {est_s:.2f} s")
+            _info(f"  distance={distance:.1f} mm  speed={spd_mms:.1f} mm/s  "
+                  f"accel={accel_mms2:.0f} mm/s²")
+
+        # ── set parameter ──
+        elif cmd == "set":
+            if len(parts) < 3:
+                _warn("Usage:  set accel <mm/s²>")
+                continue
+            key = parts[1].lower()
+            if key == "accel":
+                try:
+                    accel_mms2 = float(parts[2])
+                except ValueError:
+                    _warn("Acceleration must be a number (mm/s²).")
+                    continue
+                if accel_mms2 <= 0:
+                    _warn("Acceleration must be > 0.")
+                    continue
+                _ok(f"Acceleration assumption updated → {accel_mms2:.1f} mm/s²")
+                _warn("Note: this affects time estimates only — driver ramp is set in MEXE02.")
+            else:
+                _warn(f"Unknown setting '{key}'.  Available: accel")
+
+        # ── move ──
+        elif cmd == "m":
+            if len(parts) < 3 or len(parts) > 4:
+                _warn("Usage:  m <pos_mm> <speed_mms> [w | <wait_seconds>]")
                 continue
             try:
                 pos_mm  = float(parts[1])
@@ -386,9 +588,82 @@ def _repl(driver: MotorDriver) -> None:
                 _warn(f"Speed must be 0.1 – {MAX_SPD_MMS} mm/s.")
                 continue
 
+            # Parse optional wait argument
+            wait_s: Optional[float] = None
+            if len(parts) == 4:
+                arg = parts[3].lower()
+                if arg == "w":
+                    # Auto-estimate: travel time + 20 % margin + 0.3 s buffer
+                    distance = abs(pos_mm - (driver._last_pos_mm or 0.0))
+                    est_s    = _travel_time_s(distance, spd_mms, accel_mms2)
+                    wait_s   = est_s * 1.2 + 0.3
+                else:
+                    try:
+                        wait_s = float(arg)
+                    except ValueError:
+                        _warn("3rd argument must be 'w' or a number of seconds.")
+                        continue
+                    if wait_s < 0:
+                        _warn("Wait time must be ≥ 0.")
+                        continue
+
             _info(f"Move → {pos_mm:.2f} mm  @ {spd_mms:.2f} mm/s")
             try:
-                driver.move(pos_mm, spd_mms)
+                driver.move(pos_mm, spd_mms, wait_s=wait_s, accel_mms2=accel_mms2)
+            except serial.SerialException as exc:
+                _err(f"Serial error: {exc}")
+
+        # ── move-by-time ──
+        elif cmd == "mt":
+            if len(parts) != 3:
+                _warn("Usage:  mt <speed_mms> <time_s>")
+                _warn("  positive speed = forward, negative = backward")
+                continue
+            try:
+                spd_signed = float(parts[1])
+                time_s     = float(parts[2])
+            except ValueError:
+                _warn("Speed and time must be numbers.")
+                continue
+            if abs(spd_signed) < 0.1:
+                _warn("Speed magnitude must be ≥ 0.1 mm/s.")
+                continue
+            if time_s <= 0:
+                _warn("Time must be > 0 s.")
+                continue
+
+            spd_mms   = abs(spd_signed)
+            current   = driver._last_pos_mm if driver._last_pos_mm is not None else 0.0
+            delta_mm  = spd_signed * time_s
+            target_mm = current + delta_mm
+
+            # Clamp to safe travel range
+            target_mm = max(0.0, min(MAX_POS_MM, target_mm))
+            actual_delta = abs(target_mm - current)
+
+            if actual_delta < 0.1:
+                _warn(
+                    f"Target {target_mm:.2f} mm is already at or beyond the limit — "
+                    "nothing to do."
+                )
+                continue
+
+            if target_mm != current + delta_mm:
+                _warn(
+                    f"Clamped: requested {current + delta_mm:.2f} mm → {target_mm:.2f} mm "
+                    f"(travel limit {MAX_POS_MM} mm)."
+                )
+
+            # Wait time = commanded duration + 20 % margin for ramp-up
+            wait_s = time_s * 1.2 + 0.3
+
+            _info(
+                f"Move-by-time: {current:.2f} → {target_mm:.2f} mm  "
+                f"({'+' if delta_mm >= 0 else ''}{delta_mm:.1f} mm)  "
+                f"@ {spd_mms:.1f} mm/s  for {time_s:.2f} s"
+            )
+            try:
+                driver.move(target_mm, spd_mms, wait_s=wait_s, accel_mms2=accel_mms2)
             except serial.SerialException as exc:
                 _err(f"Serial error: {exc}")
 
@@ -402,7 +677,8 @@ def _repl(driver: MotorDriver) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="DR28T motor controller — no ROS2 required."
+        description="DR28T motor controller — no ROS2 required.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "--port", "-p",
@@ -415,6 +691,13 @@ def main() -> None:
         default=19200,
         help="Baud rate (default: 19200).",
     )
+    parser.add_argument(
+        "--accel",
+        type=float,
+        default=DEFAULT_ACCEL_MMS2,
+        help=f"Acceleration assumption for time estimates in mm/s² "
+             f"(default: {DEFAULT_ACCEL_MMS2}).  Does NOT change driver setting.",
+    )
     args = parser.parse_args()
 
     # ── Resolve port ──
@@ -426,13 +709,13 @@ def main() -> None:
             sys.exit(1)
         _info(f"Auto-detected port: {port}")
 
-    # ── Print banner ──
+    # ── Banner ──
     print()
     print(_c("bold", "  DR28T Motor Controller"))
     print(_c("gray", f"  {port}  {args.baud} baud  8E1"))
-    print(_c("gray",  "  ─────────────────────────"))
+    print(_c("gray",  "  ─────────────────────────────"))
 
-    # ── Open driver and start REPL ──
+    # ── Open and run ──
     try:
         driver = MotorDriver.open(port, args.baud)
     except serial.SerialException as exc:
@@ -440,7 +723,7 @@ def main() -> None:
         sys.exit(1)
 
     try:
-        _repl(driver)
+        _repl(driver, accel_mms2=args.accel)
     finally:
         driver.close()
         print(_c("gray", "  Goodbye."))
