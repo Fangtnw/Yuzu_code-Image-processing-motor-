@@ -5,11 +5,12 @@ Usage:
     ros2 launch motor_controller motor_lan.launch.py
 
 Axis map:
-  motor_z              — Z-axis linear (DR28T)    ← EtherNet/IP via ethernet_ip_motor_node
-  motor_yuzu_rot       — Yuzu rotation (rotary)   ← stub
-  motor_peeler_orbit   — Peeler orbit (rotary)    ← stub
-  motor_peeler_advance — Peeler advance (linear)  ← stub (second DR28T, LAN)
-  motor_conveyor       — Conveyor belt (indexed)  ← stub
+  motor_z            — Z-axis linear (DR28T)      ← EtherNet/IP via ethernet_ip_motor_node
+  motor_yuzu_rot     — Yuzu rotation (rotary)     ← stub  (Type 2)
+  motor_peeler_3     — Peeler feed top (linear)   ← stub  (Type 1)
+  motor_peeler_4     — Peeler feed bottom (linear) ← stub  (Type 1)
+  motor_peeler_orbit — Peeler orbit (rotary)      ← stub  (Type 2)
+  motor_conveyor     — Conveyor (linear, Type 1)  ← stub  (Type 1)
 
 Hardware setup:
   1. Set the AZD-KEP IP address using the rotary switches on the driver face:
@@ -43,40 +44,53 @@ ETHERNET_IP_MOTORS = [
         "ip":           "192.168.1.2",   # !! must match driver rotary switch
         "steps_per_mm": 100.0,           # !! CALIBRATE before first run
     },
-    # Second DR28T (peeler advance) — uncomment when connected:
+    # Peeler feed motors — uncomment when connected:
     # {
-    #     "ns":           "motor_peeler_advance",
-    #     "motor_id":     "motor_peeler_advance",
+    #     "ns":           "motor_peeler_3",
+    #     "motor_id":     "motor_peeler_3",
     #     "ip":           "192.168.1.3",
+    #     "steps_per_mm": 100.0,
+    # },
+    # {
+    #     "ns":           "motor_peeler_4",
+    #     "motor_id":     "motor_peeler_4",
+    #     "ip":           "192.168.1.4",
     #     "steps_per_mm": 100.0,
     # },
 ]
 
-# ── Rotary / conveyor stubs ────────────────────────────────────────────────────
-ROTARY_STUBS = [
+# ── Motor stubs (for all motors not yet connected to real hardware) ────────────
+#
+#   Type 2 (rotary) stubs: motor_spin [Float32MultiArray: rpm, accel, decel]
+#   Type 1 (linear) stubs: motor_cmd  [Float32MultiArray: pos_mm, speed, ...]
+#                           motor_home [Empty]
+MOTOR_STUBS = [
+    # ── Rotary (Type 2) ──
     {
-        "ns":             "motor_yuzu_rot",
-        "motor_id":       "motor_yuzu_rot",
-        "spin_up_time_s":  0.3,
-        "step_time_s":     0.0,
+        "ns":            "motor_yuzu_rot",
+        "motor_id":      "motor_yuzu_rot",
+        "spin_up_time_s": 0.3,
     },
     {
-        "ns":             "motor_peeler_orbit",
-        "motor_id":       "motor_peeler_orbit",
-        "spin_up_time_s":  0.3,
-        "step_time_s":     0.0,
+        "ns":            "motor_peeler_orbit",
+        "motor_id":      "motor_peeler_orbit",
+        "spin_up_time_s": 0.3,
+    },
+    # ── Linear (Type 1) ──
+    {
+        "ns":          "motor_peeler_3",
+        "motor_id":    "motor_peeler_3",
+        "move_time_s":  2.0,
     },
     {
-        "ns":             "motor_peeler_advance",
-        "motor_id":       "motor_peeler_advance",
-        "spin_up_time_s":  0.0,
-        "step_time_s":     0.5,
+        "ns":          "motor_peeler_4",
+        "motor_id":    "motor_peeler_4",
+        "move_time_s":  2.0,
     },
     {
-        "ns":             "motor_conveyor",
-        "motor_id":       "motor_conveyor",
-        "spin_up_time_s":  0.0,
-        "step_time_s":     1.5,
+        "ns":          "motor_conveyor",
+        "motor_id":    "motor_conveyor",
+        "move_time_s":  2.0,
     },
 ]
 
@@ -101,7 +115,7 @@ def generate_launch_description():
 
     # ── Stubs for motors not yet connected ──
     lan_namespaces = {m["ns"] for m in ETHERNET_IP_MOTORS}
-    for m in ROTARY_STUBS:
+    for m in MOTOR_STUBS:
         if m["ns"] in lan_namespaces:
             continue
         nodes.append(Node(
@@ -111,8 +125,8 @@ def generate_launch_description():
             namespace=m["ns"],
             parameters=[{
                 "motor_id":       m["motor_id"],
-                "spin_up_time_s": m.get("spin_up_time_s", 0.3),
-                "step_time_s":    m.get("step_time_s", 1.5),
+                "spin_up_time_s": m.get("spin_up_time_s", 0.0),
+                "move_time_s":    m.get("move_time_s",    1.0),
             }],
             output="screen",
         ))

@@ -7,10 +7,10 @@ Machine spec (YuzuSequence.pdf):
   Motor③  Feed motion (top)      — peeling depth, linear
   Motor④  Feed motion (bottom)   — peeling depth, linear
   Motor⑤  Rotational motion      — 20 rpm; positions 90° then CW orbit
-  Motor⑥  Conveyor feed
+  Motor⑥  Conveyor feed          — Type 1 linear (cumulative position per tray)
 
 Sequence (YuzuSequence.pdf page 2):
-  Step 1  Yuzu positioning   Motor⑥  FD
+  Step 1  Yuzu positioning   Motor⑥  FD  (motor_cmd: cumulative tray position)
   Step 2  Yuzu placement     Motor①  Approach
   Step 3  Peeler positioning Motor⑤  90° ROT
   Step 4  Rotation + feed    Motor② ① CCW ROT
@@ -28,26 +28,32 @@ Step 1 — publish yuzu measurements (optional; improves depth adaptation):
   Topic : /yuzu_detected
   Type  : std_msgs/Float32MultiArray
   data  : [x_offset_mm, y_offset_mm, long_axis_mm, short_axis_mm]
-    x_offset_mm   — lateral offset of yuzu centre from nominal
-    y_offset_mm   — reserved
-    long_axis_mm  — scales Z travel  (nominal 50 mm)
-    short_axis_mm — scales peeler advance depth  (nominal 44 mm)
 
-Step 2 — trigger the cycle:
-  Topic : /peel/start
-  Type  : std_msgs/Empty
+Step 2 — trigger the cycle (choose one mode):
+  Auto mode  : /peel/start        Empty  — runs all 7 steps unattended
+  Manual mode: /peel/start_manual Empty  — pauses after each step completes;
+               /peel/next_step    Empty  — advance to the next step
+                                           (ignored unless status == manual_pause)
 
 Monitor:
   Topic : /peel/status
   Type  : std_msgs/String
   values: idle | yuzu_positioning | yuzu_placement | peeler_positioning |
           rotation_feed | yuzu_gripping | z_retracting | yuzu_release |
-          done | error | aborted
+          manual_pause | done | error | aborted
 
 Emergency stop:
   Topic : /peel/abort
   Type  : std_msgs/Empty
 =============================================================
+
+Motor interface types:
+  Type 1 (linear) — motor_cmd  [Float32MultiArray: pos_mm, speed_mms, accel?, decel?, time?]
+                  — motor_home [Empty]
+                  Motors: ① motor_z, ③ motor_peeler_3, ④ motor_peeler_4, ⑥ motor_conveyor
+  Type 2 (rotary) — motor_spin [Float32MultiArray: rpm, accel_rpm_s, decel_rpm_s]
+                  — motor_stop [Empty]
+                  Motors: ② motor_yuzu_rot, ⑤ motor_peeler_orbit
 
 All timing and motion values are ROS2 parameters — tune without recompiling:
   ros2 param set /peel_sequence peel_duration_s 1.2
@@ -57,7 +63,7 @@ import threading
 
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Float32MultiArray, Float32, Empty, String
+from std_msgs.msg import Float32MultiArray, Empty, String
 
 YUZU_LONG_NOM_MM  = 50.0
 YUZU_SHORT_NOM_MM = 44.0
@@ -69,71 +75,84 @@ class PeelSequenceNode(Node):
         super().__init__("peel_sequence")
 
         # ── Motion / timing parameters ──
-        self.declare_parameter("conveyor_settle_s",          1.2)
-        self.declare_parameter("z_lower_pos_mm",            25.0)
-        self.declare_parameter("z_lower_speed_mms",         15.0)
-        self.declare_parameter("z_lower_wait_s",             2.0)
-        # Peeler positioning: Motor⑤ spins for this long to reach 90°
+        # Conveyor (Motor⑥) — Type 1; advances by one tray pitch per cycle
+        self.declare_parameter("conveyor_settle_s",           1.2)
+        self.declare_parameter("conveyor_advance_mm",        80.0)   # one tray pitch
+        self.declare_parameter("conveyor_speed_mms",         20.0)
+        # Z-axis (Motor①) — approach / home
+        self.declare_parameter("z_lower_pos_mm",             25.0)
+        self.declare_parameter("z_lower_speed_mms",          15.0)
+        self.declare_parameter("z_lower_wait_s",              2.0)
+        # Peeler positioning (Motor⑤): spins for this long to reach 90°
         # 0.25 rev at 20 rpm = 0.75 s
-        self.declare_parameter("peeler_position_rot_s",      0.75)
-        self.declare_parameter("peeler_position_wait_s",     0.3)
+        self.declare_parameter("peeler_position_rot_s",       0.75)
+        self.declare_parameter("peeler_position_wait_s",      0.3)
         # Step 4 — rotation + feed
-        self.declare_parameter("yuzu_rotation_rpm",        225.0)   # Motor② 200-250 rpm
-        self.declare_parameter("spin_up_wait_s",             0.3)
-        self.declare_parameter("peeler_advance_mm",         10.0)   # Motor③&④ FD depth
-        self.declare_parameter("peeler_advance_speed_mms",   8.0)
-        self.declare_parameter("peeler_advance_wait_s",      1.0)
-        self.declare_parameter("peeler_orbit_rpm",          20.0)   # Motor⑤ 20 rpm
-        self.declare_parameter("peel_duration_s",            1.5)
+        self.declare_parameter("yuzu_rotation_rpm",         225.0)   # Motor② 200-250 rpm
+        self.declare_parameter("yuzu_rotation_accel_rpm_s",  50.0)   # ramp up
+        self.declare_parameter("yuzu_rotation_decel_rpm_s",   0.0)   # 0 = same as accel
+        self.declare_parameter("spin_up_wait_s",              0.3)
+        self.declare_parameter("peeler_advance_mm",          10.0)   # Motor③&④ FD depth
+        self.declare_parameter("peeler_advance_speed_mms",    8.0)
+        self.declare_parameter("peeler_advance_wait_s",       1.0)
+        self.declare_parameter("peeler_orbit_rpm",           20.0)   # Motor⑤ 20 rpm
+        self.declare_parameter("peeler_orbit_accel_rpm_s",   20.0)
+        self.declare_parameter("peeler_orbit_decel_rpm_s",    0.0)   # 0 = same as accel
+        self.declare_parameter("peel_duration_s",             1.5)
         # Step 5 — yuzu gripping (extra FD on top of advance)
-        self.declare_parameter("grip_advance_mm",            3.0)
-        self.declare_parameter("grip_speed_mms",             5.0)
-        self.declare_parameter("grip_wait_s",                0.5)
+        self.declare_parameter("grip_advance_mm",             3.0)
+        self.declare_parameter("grip_speed_mms",              5.0)
+        self.declare_parameter("grip_wait_s",                 0.5)
         # Step 6 — Z home
-        self.declare_parameter("z_home_wait_s",              2.0)
+        self.declare_parameter("z_home_wait_s",               2.0)
         # Step 7 — peeler release
-        self.declare_parameter("release_wait_s",             0.8)
+        self.declare_parameter("release_wait_s",              0.8)
 
         # ── Publishers to all 6 motors ──
         self._pub = {
-            # Motor①: Z-axis (yuzu holding set)
-            "z_cmd":          self.create_publisher(Float32MultiArray, "/motor_z/motor_cmd",  10),
-            "z_home":         self.create_publisher(Empty,             "/motor_z/motor_home", 10),
-            # Motor②: Yuzu rotation spindle (CCW, 200-250 rpm)
-            "yuzu_spin":      self.create_publisher(Float32,           "/motor_yuzu_rot/motor_spin", 10),
-            "yuzu_stop":      self.create_publisher(Empty,             "/motor_yuzu_rot/motor_stop", 10),
-            # Motor③: Peeler feed top (linear, peeling depth)
-            "peeler3_cmd":    self.create_publisher(Float32MultiArray, "/motor_peeler_3/motor_cmd",  10),
-            "peeler3_home":   self.create_publisher(Empty,             "/motor_peeler_3/motor_home", 10),
-            # Motor④: Peeler feed bottom (linear, peeling depth)
-            "peeler4_cmd":    self.create_publisher(Float32MultiArray, "/motor_peeler_4/motor_cmd",  10),
-            "peeler4_home":   self.create_publisher(Empty,             "/motor_peeler_4/motor_home", 10),
-            # Motor⑤: Peeler orbit (positions 90° then CW at 20 rpm)
-            "orbit_spin":     self.create_publisher(Float32,           "/motor_peeler_orbit/motor_spin", 10),
-            "orbit_stop":     self.create_publisher(Empty,             "/motor_peeler_orbit/motor_stop", 10),
-            # Motor⑥: Conveyor
-            "conveyor_step":  self.create_publisher(Empty,             "/motor_conveyor/motor_step", 10),
+            # Motor①: Z-axis (yuzu holding set) — Type 1
+            "z_cmd":         self.create_publisher(Float32MultiArray, "/motor_z/motor_cmd",  10),
+            "z_home":        self.create_publisher(Empty,             "/motor_z/motor_home", 10),
+            # Motor②: Yuzu rotation spindle — Type 2 [rpm, accel_rpm_s, decel_rpm_s]
+            "yuzu_spin":     self.create_publisher(Float32MultiArray, "/motor_yuzu_rot/motor_spin", 10),
+            "yuzu_stop":     self.create_publisher(Empty,             "/motor_yuzu_rot/motor_stop", 10),
+            # Motor③: Peeler feed top — Type 1
+            "peeler3_cmd":   self.create_publisher(Float32MultiArray, "/motor_peeler_3/motor_cmd",  10),
+            "peeler3_home":  self.create_publisher(Empty,             "/motor_peeler_3/motor_home", 10),
+            # Motor④: Peeler feed bottom — Type 1
+            "peeler4_cmd":   self.create_publisher(Float32MultiArray, "/motor_peeler_4/motor_cmd",  10),
+            "peeler4_home":  self.create_publisher(Empty,             "/motor_peeler_4/motor_home", 10),
+            # Motor⑤: Peeler orbit — Type 2 [rpm, accel_rpm_s, decel_rpm_s]
+            "orbit_spin":    self.create_publisher(Float32MultiArray, "/motor_peeler_orbit/motor_spin", 10),
+            "orbit_stop":    self.create_publisher(Empty,             "/motor_peeler_orbit/motor_stop", 10),
+            # Motor⑥: Conveyor — Type 1; cumulative position tracks tray count
+            "conveyor_cmd":  self.create_publisher(Float32MultiArray, "/motor_conveyor/motor_cmd",  10),
+            "conveyor_home": self.create_publisher(Empty,             "/motor_conveyor/motor_home", 10),
         }
 
         # ── Peel sequence interface ──
         self._status_pub = self.create_publisher(String, "/peel/status", 10)
-        self.create_subscription(Empty,             "/peel/start",    self._on_start,         10)
-        self.create_subscription(Empty,             "/peel/abort",    self._on_abort,         10)
-        self.create_subscription(Float32MultiArray, "/yuzu_detected", self._on_yuzu_detected, 10)
+        self.create_subscription(Empty,             "/peel/start",        self._on_start,         10)
+        self.create_subscription(Empty,             "/peel/start_manual", self._on_start_manual,  10)
+        self.create_subscription(Empty,             "/peel/next_step",    self._on_next_step,     10)
+        self.create_subscription(Empty,             "/peel/abort",        self._on_abort,         10)
+        self.create_subscription(Float32MultiArray, "/yuzu_detected",     self._on_yuzu_detected, 10)
 
-        self._state       = "idle"
-        self._abort_event = threading.Event()
-        self._seq_thread  = None
-        self._yuzu_info   = None
+        self._state           = "idle"
+        self._abort_event     = threading.Event()
+        self._step_event      = threading.Event()   # gates manual mode between steps
+        self._manual_mode     = False
+        self._seq_thread      = None
+        self._yuzu_info       = None
+        self._conveyor_pos_mm = 0.0   # cumulative conveyor position (n_trays × pitch)
 
         self._publish_status("idle")
         self.get_logger().info("=" * 60)
         self.get_logger().info("Peel sequence node ready.  6-motor / 8-step (YuzuSequence.pdf)")
-        self.get_logger().info("IMAGE TEAM: publish /yuzu_detected then /peel/start")
-        self.get_logger().info("  /yuzu_detected  Float32MultiArray  [x_off, y_off, long_mm, short_mm]")
-        self.get_logger().info("  /peel/start     Empty")
-        self.get_logger().info("  /peel/abort     Empty")
-        self.get_logger().info("  /peel/status    String  (output)")
+        self.get_logger().info("  Auto mode  : /peel/start")
+        self.get_logger().info("  Manual mode: /peel/start_manual  then  /peel/next_step per step")
+        self.get_logger().info("  Abort      : /peel/abort")
+        self.get_logger().info("  Status     : /peel/status")
         self.get_logger().info("=" * 60)
 
     # ── External callbacks ─────────────────────────────────────────
@@ -158,14 +177,36 @@ class PeelSequenceNode(Node):
         if self._state not in ("idle", "done", "error", "aborted"):
             self.get_logger().warn(f"Busy (state={self._state}) — ignoring /peel/start.")
             return
-        self.get_logger().info("Starting peel sequence.")
+        self.get_logger().info("Starting peel sequence  [AUTO mode].")
+        self._manual_mode = False
         self._abort_event.clear()
+        self._step_event.clear()
         self._seq_thread = threading.Thread(target=self._run_sequence, daemon=True)
         self._seq_thread.start()
+
+    def _on_start_manual(self, _):
+        if self._state not in ("idle", "done", "error", "aborted"):
+            self.get_logger().warn(f"Busy (state={self._state}) — ignoring /peel/start_manual.")
+            return
+        self.get_logger().info("Starting peel sequence  [MANUAL step-by-step mode].")
+        self._manual_mode = True
+        self._abort_event.clear()
+        self._step_event.clear()
+        self._seq_thread = threading.Thread(target=self._run_sequence, daemon=True)
+        self._seq_thread.start()
+
+    def _on_next_step(self, _):
+        if self._state != "manual_pause":
+            self.get_logger().warn(
+                f"Not paused (state={self._state}) — ignoring /peel/next_step.")
+            return
+        self.get_logger().info("Next step confirmed by operator.")
+        self._step_event.set()
 
     def _on_abort(self, _):
         self.get_logger().warn("ABORT received — stopping all motors immediately.")
         self._abort_event.set()
+        self._step_event.set()   # unblock any waiting gate so thread can exit
         self._emergency_stop()
         self._set_state("aborted")
 
@@ -185,56 +226,59 @@ class PeelSequenceNode(Node):
                     f"Adapted — z_lower={z_lower:.1f} mm  blade_advance={blade_advance:.1f} mm"
                 )
 
-            # Step 1: Yuzu positioning — Motor⑥ FD
+            # ── Step 1: Yuzu positioning — Motor⑥ FD ──────────────────
             self._set_state("yuzu_positioning")
-            self._pub["conveyor_step"].publish(Empty())
-            if not self._wait(p["conveyor_settle_s"]): return
+            self._conveyor_pos_mm += p["conveyor_advance_mm"]
+            self._send_linear("conveyor_cmd", self._conveyor_pos_mm, p["conveyor_speed_mms"])
+            if not self._wait_step(p["conveyor_settle_s"]): return
 
-            # Step 2: Yuzu placement — Motor① Approach (Z-axis lowers onto yuzu)
+            # ── Step 2: Yuzu placement — Motor① Approach ──────────────
             self._set_state("yuzu_placement")
             self._send_linear("z_cmd", z_lower, p["z_lower_speed_mms"])
-            if not self._wait(p["z_lower_wait_s"]): return
+            if not self._wait_step(p["z_lower_wait_s"]): return
 
-            # Step 3: Peeler positioning — Motor⑤ 90° ROT
-            # Spin at orbit rpm for timed duration to reach 90° (0.25 rev at 20 rpm = 0.75 s)
+            # ── Step 3: Peeler positioning — Motor⑤ 90° ROT ───────────
             self._set_state("peeler_positioning")
-            self._send_rpm("orbit_spin", p["peeler_orbit_rpm"])
-            if not self._wait(p["peeler_position_rot_s"]): return
+            self._send_rpm("orbit_spin", p["peeler_orbit_rpm"],
+                           p["peeler_orbit_accel_rpm_s"], p["peeler_orbit_decel_rpm_s"])
+            if not self._wait(p["peeler_position_rot_s"]): return   # intra-step timing
             self._pub["orbit_stop"].publish(Empty())
-            if not self._wait(p["peeler_position_wait_s"]): return
+            if not self._wait_step(p["peeler_position_wait_s"]): return
 
-            # Step 4: Rotation and feed motion — three sequential sub-steps per spec
+            # ── Step 4: Rotation + feed — ①②③ sub-steps ──────────────
             self._set_state("rotation_feed")
-            # ① Motor② CCW ROT — yuzu starts spinning
-            self._send_rpm("yuzu_spin", p["yuzu_rotation_rpm"])
-            if not self._wait(p["spin_up_wait_s"]): return
-            # ② Motor③&④ FD simultaneously — peelers advance to peeling depth
+            # ① Motor② CCW ROT
+            self._send_rpm("yuzu_spin", p["yuzu_rotation_rpm"],
+                           p["yuzu_rotation_accel_rpm_s"], p["yuzu_rotation_decel_rpm_s"])
+            if not self._wait(p["spin_up_wait_s"]): return          # intra-step timing
+            # ② Motor③&④ FD simultaneously
             self._send_linear("peeler3_cmd", blade_advance, p["peeler_advance_speed_mms"])
             self._send_linear("peeler4_cmd", blade_advance, p["peeler_advance_speed_mms"])
-            if not self._wait(p["peeler_advance_wait_s"]): return
-            # ③ Motor⑤ CW ROT — peeler orbit starts; hold for peel_duration_s
-            self._send_rpm("orbit_spin", p["peeler_orbit_rpm"])
-            if not self._wait(p["peel_duration_s"]): return
+            if not self._wait(p["peeler_advance_wait_s"]): return   # intra-step timing
+            # ③ Motor⑤ CW ROT — orbit for peel_duration_s
+            self._send_rpm("orbit_spin", p["peeler_orbit_rpm"],
+                           p["peeler_orbit_accel_rpm_s"], p["peeler_orbit_decel_rpm_s"])
+            if not self._wait_step(p["peel_duration_s"]): return
 
-            # Step 5: Yuzu gripping — Motor③&④ FD (additional grip beyond peeling depth)
+            # ── Step 5: Yuzu gripping — Motor③&④ FD ──────────────────
             self._set_state("yuzu_gripping")
             grip_pos = min(29.0, blade_advance + p["grip_advance_mm"])
             self._send_linear("peeler3_cmd", grip_pos, p["grip_speed_mms"])
             self._send_linear("peeler4_cmd", grip_pos, p["grip_speed_mms"])
-            if not self._wait(p["grip_wait_s"]): return
+            if not self._wait_step(p["grip_wait_s"]): return
 
-            # Step 6: Feed motion — Motor① HOME; also stop ② and ⑤
+            # ── Step 6: Z retract — Motor① HOME + stop ②⑤ ────────────
             self._set_state("z_retracting")
             self._pub["z_home"].publish(Empty())
             self._pub["yuzu_stop"].publish(Empty())
             self._pub["orbit_stop"].publish(Empty())
-            if not self._wait(p["z_home_wait_s"]): return
+            if not self._wait_step(p["z_home_wait_s"]): return
 
-            # Step 7: Yuzu release — Motor③&④ HOME
+            # ── Step 7: Yuzu release — Motor③&④ HOME ──────────────────
             self._set_state("yuzu_release")
             self._pub["peeler3_home"].publish(Empty())
             self._pub["peeler4_home"].publish(Empty())
-            if not self._wait(p["release_wait_s"]): return
+            if not self._wait_step(p["release_wait_s"]): return
 
             self._set_state("done")
 
@@ -247,12 +291,14 @@ class PeelSequenceNode(Node):
 
     def _load_params(self) -> dict:
         names = [
-            "conveyor_settle_s",
+            "conveyor_settle_s", "conveyor_advance_mm", "conveyor_speed_mms",
             "z_lower_pos_mm", "z_lower_speed_mms", "z_lower_wait_s",
             "peeler_position_rot_s", "peeler_position_wait_s",
-            "yuzu_rotation_rpm", "spin_up_wait_s",
+            "yuzu_rotation_rpm", "yuzu_rotation_accel_rpm_s", "yuzu_rotation_decel_rpm_s",
+            "spin_up_wait_s",
             "peeler_advance_mm", "peeler_advance_speed_mms", "peeler_advance_wait_s",
-            "peeler_orbit_rpm", "peel_duration_s",
+            "peeler_orbit_rpm", "peeler_orbit_accel_rpm_s", "peeler_orbit_decel_rpm_s",
+            "peel_duration_s",
             "grip_advance_mm", "grip_speed_mms", "grip_wait_s",
             "z_home_wait_s", "release_wait_s",
         ]
@@ -263,15 +309,37 @@ class PeelSequenceNode(Node):
         msg.data = [float(pos_mm), float(speed_mms)]
         self._pub[key].publish(msg)
 
-    def _send_rpm(self, key: str, rpm: float):
-        msg = Float32()
-        msg.data = float(rpm)
+    def _send_rpm(self, key: str, rpm: float,
+                  accel_rpm_s: float = 0.0, decel_rpm_s: float = 0.0):
+        """Publish a Type 2 spin command: [rpm, accel_rpm_s, effective_decel_rpm_s]."""
+        effective_decel = decel_rpm_s if decel_rpm_s > 0.0 else accel_rpm_s
+        msg = Float32MultiArray()
+        msg.data = [float(rpm), float(accel_rpm_s), float(effective_decel)]
         self._pub[key].publish(msg)
 
     def _wait(self, duration_s: float) -> bool:
-        """Block for duration_s; return False early if abort received."""
+        """Timed wait; returns False immediately if abort fires."""
         aborted = self._abort_event.wait(timeout=duration_s)
         return not aborted
+
+    def _wait_step(self, duration_s: float) -> bool:
+        """Timed wait for step completion, then in manual mode pause for operator.
+
+        Returns False if aborted at any point.
+        """
+        if not self._wait(duration_s):
+            return False
+        if self._manual_mode:
+            self._step_event.clear()
+            self._set_state("manual_pause")
+            self.get_logger().info("Manual pause — waiting for /peel/next_step ...")
+            # Poll so abort can interrupt the indefinite wait
+            while not self._step_event.wait(timeout=0.2):
+                if self._abort_event.is_set():
+                    return False
+            if self._abort_event.is_set():
+                return False
+        return True
 
     def _emergency_stop(self):
         self._pub["yuzu_stop"].publish(Empty())
@@ -279,6 +347,8 @@ class PeelSequenceNode(Node):
         self._pub["z_home"].publish(Empty())
         self._pub["peeler3_home"].publish(Empty())
         self._pub["peeler4_home"].publish(Empty())
+        self._pub["conveyor_home"].publish(Empty())
+        self._conveyor_pos_mm = 0.0
         self.get_logger().warn("Emergency stop: all motors halted / homed.")
 
     def _set_state(self, state: str):

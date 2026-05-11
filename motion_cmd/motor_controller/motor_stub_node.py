@@ -10,29 +10,42 @@ Replace this stub with the real driver node when each motor + controller
 arrives and is wired up.
 
 --------------------------------------------------------------------
-Subscribed topics  (relative to node namespace)
+Type 1 — Linear position control  (M① M③ M④ M⑥)
 --------------------------------------------------------------------
-  ~/motor_spin   [std_msgs/Float32]  — set target RPM  (rotary motors)
-  ~/motor_stop   [std_msgs/Empty]    — stop rotation
-  ~/motor_step   [std_msgs/Empty]    — advance one position (conveyor)
+  ~/motor_cmd    [std_msgs/Float32MultiArray]
+                  data[0]  target_position_mm
+                  data[1]  speed_mm_s
+                  data[2]  accel_mm_s2    (optional; 0 → node default)
+                  data[3]  decel_mm_s2    (optional; 0 → same as accel)
+                  data[4]  move_time_s    (optional; overrides sim time when > 0)
+  ~/motor_home   [std_msgs/Empty]   → simulated ZHOME sequence
+
+Type 2 — Rotary velocity control  (M② M⑤)
+--------------------------------------------------------------------
+  ~/motor_spin   [std_msgs/Float32MultiArray]
+                  data[0]  target_rpm
+                  data[1]  accel_rpm_s   (optional; 0 → instant)
+                  data[2]  decel_rpm_s   (optional; 0 → same as accel)
+  ~/motor_stop   [std_msgs/Empty]   → stop and hold
 
 Published topics
 --------------------------------------------------------------------
-  ~/motor_status [std_msgs/String]   — "idle" | "spinning" | "stepping"
+  ~/motor_status [std_msgs/String]   — "idle" | "running" | "spinning"
 
 Parameters
 --------------------------------------------------------------------
   motor_id          (str)   — label used in log messages
-  spin_up_time_s    (float) — simulated delay before "spinning"   (default 0.3)
-  spin_down_time_s  (float) — simulated delay before "idle"       (default 0.2)
-  step_time_s       (float) — simulated conveyor step duration    (default 1.5)
+  spin_up_time_s    (float) — simulated spin-up delay before "spinning"  (default 0.3)
+  spin_down_time_s  (float) — simulated spin-down delay before "idle"    (default 0.2)
+  move_time_s       (float) — simulated travel time before "idle"        (default 1.0)
+  move_settle_s     (float) — extra settle delay after move completes    (default 0.1)
 """
 
 import threading
 
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Float32, Empty, String
+from std_msgs.msg import Float32MultiArray, Empty, String
 
 
 class MotorStubNode(Node):
@@ -43,54 +56,111 @@ class MotorStubNode(Node):
         self.declare_parameter("motor_id",         "motor")
         self.declare_parameter("spin_up_time_s",   0.3)
         self.declare_parameter("spin_down_time_s", 0.2)
-        self.declare_parameter("step_time_s",      1.5)
+        self.declare_parameter("move_time_s",      1.0)
+        self.declare_parameter("move_settle_s",    0.1)
 
         self._motor_id       = self.get_parameter("motor_id").value
         self._spin_up_time   = self.get_parameter("spin_up_time_s").value
         self._spin_down_time = self.get_parameter("spin_down_time_s").value
-        self._step_time      = self.get_parameter("step_time_s").value
+        self._move_time      = self.get_parameter("move_time_s").value
+        self._move_settle    = self.get_parameter("move_settle_s").value
 
         self._status_pub = self.create_publisher(String, "motor_status", 10)
-        self.create_subscription(Float32, "motor_spin", self._on_spin, 10)
-        self.create_subscription(Empty,   "motor_stop", self._on_stop, 10)
-        self.create_subscription(Empty,   "motor_step", self._on_step, 10)
 
-        self._current_rpm = 0.0
-        self._lock = threading.Lock()
+        # Type 1 — linear position control
+        self.create_subscription(Float32MultiArray, "motor_cmd",  self._on_cmd,  10)
+        self.create_subscription(Empty,             "motor_home", self._on_home, 10)
+
+        # Type 2 — rotary velocity control
+        self.create_subscription(Float32MultiArray, "motor_spin", self._on_spin, 10)
+        self.create_subscription(Empty,             "motor_stop", self._on_stop, 10)
+
+        self._current_pos_mm = 0.0
+        self._current_rpm    = 0.0
+        self._lock           = threading.Lock()
 
         self._publish_status("idle")
         self.get_logger().info(
             f"[{self._motor_id}] Motor stub ready  "
-            f"(spin_up={self._spin_up_time}s  step={self._step_time}s)"
+            f"(spin_up={self._spin_up_time}s  move={self._move_time}s)"
         )
         self.get_logger().warn(
             f"[{self._motor_id}] STUB — no hardware.  "
             f"Replace with the real driver node when this motor arrives."
         )
 
-    # ── Callbacks ──────────────────────────────────────────────────
+    # ── Type 1 callbacks ───────────────────────────────────────────
 
-    def _on_spin(self, msg: Float32):
-        rpm = msg.data
+    def _on_cmd(self, msg: Float32MultiArray):
+        if len(msg.data) < 2:
+            self.get_logger().warn(
+                f"[{self._motor_id}] motor_cmd needs at least [pos_mm, speed_mms]"
+            )
+            return
+        pos_mm = msg.data[0]
+        speed  = msg.data[1]
+        accel  = msg.data[2] if len(msg.data) > 2 else 0.0
+        decel  = msg.data[3] if len(msg.data) > 3 else accel
+        move_t = msg.data[4] if len(msg.data) > 4 else 0.0
+
+        with self._lock:
+            self._current_pos_mm = pos_mm
+
+        sim_time = move_t if move_t > 0.0 else self._move_time
+        self.get_logger().info(
+            f"[{self._motor_id}] CMD  pos={pos_mm:.1f} mm  spd={speed:.1f} mm/s  "
+            f"accel={accel:.1f}  decel={decel:.1f}  (sim {sim_time:.2f}s)"
+        )
+        self._publish_status("running")
+        threading.Timer(
+            sim_time + self._move_settle,
+            lambda: self._publish_status("idle"),
+        ).start()
+
+    def _on_home(self, _):
+        with self._lock:
+            self._current_pos_mm = 0.0
+        self.get_logger().info(
+            f"[{self._motor_id}] HOME — returning to zero (sim {self._move_time:.2f}s)"
+        )
+        self._publish_status("running")
+        threading.Timer(
+            self._move_time + self._move_settle,
+            lambda: self._publish_status("idle"),
+        ).start()
+
+    # ── Type 2 callbacks ───────────────────────────────────────────
+
+    def _on_spin(self, msg: Float32MultiArray):
+        if len(msg.data) < 1:
+            self.get_logger().warn(
+                f"[{self._motor_id}] motor_spin needs at least [rpm]"
+            )
+            return
+        rpm   = msg.data[0]
+        accel = msg.data[1] if len(msg.data) > 1 else 0.0
+        decel = msg.data[2] if len(msg.data) > 2 else accel
+
         with self._lock:
             self._current_rpm = rpm
-        self.get_logger().info(f"[{self._motor_id}] Spinning at {rpm:.1f} rpm (simulated)")
-        threading.Timer(self._spin_up_time, lambda: self._publish_status("spinning")).start()
+
+        self.get_logger().info(
+            f"[{self._motor_id}] SPIN  rpm={rpm:.1f}  accel={accel:.1f}  "
+            f"decel={decel:.1f}  (simulated)"
+        )
+        threading.Timer(
+            self._spin_up_time,
+            lambda: self._publish_status("spinning"),
+        ).start()
 
     def _on_stop(self, _):
         with self._lock:
             self._current_rpm = 0.0
-        self.get_logger().info(f"[{self._motor_id}] Stopping (simulated)")
-        threading.Timer(self._spin_down_time, lambda: self._publish_status("idle")).start()
-
-    def _on_step(self, _):
-        """Conveyor: advance one tray, then return to idle after step_time_s."""
-        self.get_logger().info(
-            f"[{self._motor_id}] Step command — advancing one tray "
-            f"(simulated {self._step_time}s)"
-        )
-        self._publish_status("stepping")
-        threading.Timer(self._step_time, lambda: self._publish_status("idle")).start()
+        self.get_logger().info(f"[{self._motor_id}] STOP (simulated)")
+        threading.Timer(
+            self._spin_down_time,
+            lambda: self._publish_status("idle"),
+        ).start()
 
     # ── Helpers ────────────────────────────────────────────────────
 

@@ -6,15 +6,15 @@ from tkinter import ttk, messagebox
 import rclpy
 from rclpy.node import Node
 from rclpy.executors import MultiThreadedExecutor
-from std_msgs.msg import Float32MultiArray, Float32, Empty, String
+from std_msgs.msg import Float32MultiArray, Empty, String
 
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Motor configuration  (YuzuSequence.pdf)
 #
-#   type "linear"   → position (mm) + speed (mm/s) control  [DR28T / ABZO]
-#   type "rotary"   → RPM + Spin / Stop  (add default_rpm and rpm_hint per spec)
-#   type "conveyor" → single Step button
+#   type "linear" → Type 1: position (mm) + speed (mm/s) + accel/decel  [DR28T / ABZO]
+#   type "rotary" → Type 2: RPM + Accel + Decel; Spin / Stop
+#                   add default_rpm, rpm_hint, default_accel_rpm_s, default_decel_rpm_s
 # ──────────────────────────────────────────────────────────────────────────────
 
 MOTORS = [
@@ -24,11 +24,13 @@ MOTORS = [
         "type":  "linear",
     },
     {
-        "label":       "Yuzu Rotation (M②)",
-        "ns":          "motor_yuzu_rot",
-        "type":        "rotary",
-        "default_rpm": 225.0,
-        "rpm_hint":    "spec: 200-250 rpm  CCW",
+        "label":               "Yuzu Rotation (M②)",
+        "ns":                  "motor_yuzu_rot",
+        "type":                "rotary",
+        "default_rpm":         225.0,
+        "rpm_hint":            "spec: 200-250 rpm  CCW",
+        "default_accel_rpm_s":  50.0,
+        "default_decel_rpm_s":   0.0,
     },
     {
         "label": "Peeler Feed 3 (M③)",
@@ -41,16 +43,18 @@ MOTORS = [
         "type":  "linear",
     },
     {
-        "label":       "Peeler Orbit (M⑤)",
-        "ns":          "motor_peeler_orbit",
-        "type":        "rotary",
-        "default_rpm": 20.0,
-        "rpm_hint":    "spec: 20 rpm  CW (pos: 90° ROT)",
+        "label":               "Peeler Orbit (M⑤)",
+        "ns":                  "motor_peeler_orbit",
+        "type":                "rotary",
+        "default_rpm":         20.0,
+        "rpm_hint":            "spec: 20 rpm  CW (pos: 90° ROT)",
+        "default_accel_rpm_s": 20.0,
+        "default_decel_rpm_s":  0.0,
     },
     {
         "label": "Conveyor (M⑥)",
         "ns":    "motor_conveyor",
-        "type":  "conveyor",
+        "type":  "linear",
     },
 ]
 
@@ -61,7 +65,9 @@ MIN_SPEED = 0.1
 MAX_SPEED = 100.0
 MIN_ACCEL = 0.0
 MAX_ACCEL = 100000.0
-MAX_RPM   = 300.0
+MAX_RPM       = 300.0
+MIN_RPM_ACCEL = 0.0
+MAX_RPM_ACCEL = 10000.0
 
 STATUS_COLORS = {
     "idle":     "#4caf50",
@@ -83,12 +89,13 @@ PEEL_COLORS = {
     "yuzu_gripping":      "#f44336",
     "z_retracting":       "#ff9800",
     "yuzu_release":       "#4caf50",
+    "manual_pause":       "#ffeb3b",   # yellow — waiting for operator
     "done":               "#4caf50",
     "error":              "#f44336",
     "aborted":            "#795548",
 }
 
-# Ordered list of sequence states shown in the progress tracker
+# Ordered list of sequence step states
 PEEL_STEPS = [
     "yuzu_positioning",
     "yuzu_placement",
@@ -99,7 +106,7 @@ PEEL_STEPS = [
     "yuzu_release",
 ]
 
-# Human-readable label and which motors are active per step
+# Display label and active motors for each step (parallel to PEEL_STEPS)
 PEEL_STEP_INFO = [
     ("① Yuzu positioning",   "M⑥ FD"),
     ("② Yuzu placement",     "M① Approach"),
@@ -127,10 +134,8 @@ class MotorGuiNode(Node):
             self._cmd_pub  = self.create_publisher(Float32MultiArray, "motor_cmd",  10)
             self._home_pub = self.create_publisher(Empty,             "motor_home", 10)
         elif motor_type == "rotary":
-            self._spin_pub = self.create_publisher(Float32, "motor_spin", 10)
-            self._stop_pub = self.create_publisher(Empty,   "motor_stop", 10)
-        elif motor_type == "conveyor":
-            self._step_pub = self.create_publisher(Empty, "motor_step", 10)
+            self._spin_pub = self.create_publisher(Float32MultiArray, "motor_spin", 10)
+            self._stop_pub = self.create_publisher(Empty,             "motor_stop", 10)
 
         self.create_subscription(String, "motor_status", lambda m: status_callback(m.data), 10)
 
@@ -154,16 +159,14 @@ class MotorGuiNode(Node):
     def send_home(self):
         self._home_pub.publish(Empty())
 
-    def send_spin(self, rpm: float):
-        msg = Float32()
-        msg.data = rpm
+    def send_spin(self, rpm: float, accel_rpm_s: float = 0.0, decel_rpm_s: float = 0.0):
+        effective_decel = decel_rpm_s if decel_rpm_s > 0.0 else accel_rpm_s
+        msg = Float32MultiArray()
+        msg.data = [rpm, accel_rpm_s, effective_decel]
         self._spin_pub.publish(msg)
 
     def send_stop(self):
         self._stop_pub.publish(Empty())
-
-    def send_step(self):
-        self._step_pub.publish(Empty())
 
 
 class PeelGuiNode(Node):
@@ -171,13 +174,21 @@ class PeelGuiNode(Node):
 
     def __init__(self, status_callback, yuzu_callback):
         super().__init__("peel_gui")
-        self._start_pub = self.create_publisher(Empty, "/peel/start", 10)
-        self._abort_pub = self.create_publisher(Empty, "/peel/abort", 10)
+        self._start_pub      = self.create_publisher(Empty, "/peel/start",        10)
+        self._start_man_pub  = self.create_publisher(Empty, "/peel/start_manual", 10)
+        self._next_step_pub  = self.create_publisher(Empty, "/peel/next_step",    10)
+        self._abort_pub      = self.create_publisher(Empty, "/peel/abort",        10)
         self.create_subscription(String,            "/peel/status",   lambda m: status_callback(m.data),     10)
         self.create_subscription(Float32MultiArray, "/yuzu_detected", lambda m: yuzu_callback(list(m.data)), 10)
 
-    def start(self):
+    def start_auto(self):
         self._start_pub.publish(Empty())
+
+    def start_manual(self):
+        self._start_man_pub.publish(Empty())
+
+    def next_step(self):
+        self._next_step_pub.publish(Empty())
 
     def abort(self):
         self._abort_pub.publish(Empty())
@@ -248,8 +259,6 @@ class MotorPanel:
             self._build_linear(pad)
         elif self._type == "rotary":
             self._build_rotary(pad)
-        elif self._type == "conveyor":
-            self._build_conveyor(pad)
 
         self._log = _log_widget(self._frame, row=3)
         _log_print(self._log, "Panel ready.")
@@ -286,8 +295,10 @@ class MotorPanel:
         ttk.Button(hf, text="Go Home", command=self._on_home).pack(fill="x")
 
     def _build_rotary(self, pad):
-        default_rpm = self._cfg.get("default_rpm", 200.0)
-        rpm_hint    = self._cfg.get("rpm_hint", f"0 - {MAX_RPM}")
+        default_rpm   = self._cfg.get("default_rpm", 200.0)
+        rpm_hint      = self._cfg.get("rpm_hint", f"0 - {MAX_RPM}")
+        default_accel = self._cfg.get("default_accel_rpm_s", 0.0)
+        default_decel = self._cfg.get("default_decel_rpm_s", 0.0)
 
         f = ttk.LabelFrame(self._frame, text="Rotation Command", padding=12)
         f.grid(row=1, column=0, columnspan=3, sticky="ew", **pad)
@@ -297,17 +308,23 @@ class MotorPanel:
         ttk.Entry(f, textvariable=self._rpm_var, width=10).grid(row=0, column=1, sticky="w", padx=(8, 0))
         tk.Label(f, text=rpm_hint, fg="gray").grid(row=0, column=2, sticky="w", padx=(6, 0))
 
+        tk.Label(f, text="Accel (rpm/s)").grid(row=1, column=0, sticky="w", pady=4)
+        self._accel_rpm_var = tk.StringVar(value=str(default_accel))
+        ttk.Entry(f, textvariable=self._accel_rpm_var, width=10).grid(row=1, column=1, sticky="w", padx=(8, 0))
+        tk.Label(f, text=f"[{MIN_RPM_ACCEL:.0f} - {MAX_RPM_ACCEL:.0f}]  0 = instant",
+                 fg="gray").grid(row=1, column=2, sticky="w", padx=(6, 0))
+
+        tk.Label(f, text="Decel (rpm/s)").grid(row=2, column=0, sticky="w", pady=4)
+        self._decel_rpm_var = tk.StringVar(value=str(default_decel))
+        ttk.Entry(f, textvariable=self._decel_rpm_var, width=10).grid(row=2, column=1, sticky="w", padx=(8, 0))
+        tk.Label(f, text="0 = same as accel",
+                 fg="gray").grid(row=2, column=2, sticky="w", padx=(6, 0))
+
         bf = tk.Frame(f)
-        bf.grid(row=1, column=0, columnspan=3, pady=(10, 0), sticky="ew")
+        bf.grid(row=3, column=0, columnspan=3, pady=(10, 0), sticky="ew")
         ttk.Button(bf, text="Spin", command=self._on_spin).pack(side="left", expand=True, fill="x", padx=(0, 4))
         ttk.Button(bf, text="Stop", command=self._on_stop).pack(side="left", expand=True, fill="x")
 
-        tk.Frame(self._frame, height=1).grid(row=2)
-
-    def _build_conveyor(self, pad):
-        f = ttk.LabelFrame(self._frame, text="Conveyor", padding=12)
-        f.grid(row=1, column=0, columnspan=3, sticky="ew", **pad)
-        ttk.Button(f, text="Step  (advance one tray)", command=self._on_step).pack(fill="x")
         tk.Frame(self._frame, height=1).grid(row=2)
 
     # ── Handlers ──────────────────────────────────────────────────
@@ -388,23 +405,29 @@ class MotorPanel:
 
     def _on_spin(self):
         try:
-            rpm = float(self._rpm_var.get().strip())
+            rpm   = float(self._rpm_var.get().strip())
+            accel = float(self._accel_rpm_var.get().strip())
+            decel = float(self._decel_rpm_var.get().strip())
         except ValueError:
-            messagebox.showerror("Invalid Input", "RPM must be a number.")
+            messagebox.showerror("Invalid Input", "RPM, Accel, and Decel must be numbers.")
             return
         if not (0.0 <= rpm <= MAX_RPM):
             messagebox.showerror("Out of Range", f"RPM must be 0 - {MAX_RPM}.")
             return
-        self._node.send_spin(rpm)
-        _log_print(self._log, f">> motor_spin  rpm={rpm}")
+        if not (MIN_RPM_ACCEL <= accel <= MAX_RPM_ACCEL):
+            messagebox.showerror("Out of Range",
+                                 f"Accel must be {MIN_RPM_ACCEL:.0f} - {MAX_RPM_ACCEL:.0f} rpm/s.")
+            return
+        if not (MIN_RPM_ACCEL <= decel <= MAX_RPM_ACCEL):
+            messagebox.showerror("Out of Range",
+                                 f"Decel must be {MIN_RPM_ACCEL:.0f} - {MAX_RPM_ACCEL:.0f} rpm/s.")
+            return
+        self._node.send_spin(rpm, accel, decel)
+        _log_print(self._log, f">> motor_spin  rpm={rpm}  accel={accel:.1f}  decel={decel:.1f}")
 
     def _on_stop(self):
         self._node.send_stop()
         _log_print(self._log, ">> motor_stop")
-
-    def _on_step(self):
-        self._node.send_step()
-        _log_print(self._log, ">> motor_step")
 
     # ── Status update (called from ROS thread) ─────────────────────
 
@@ -422,18 +445,21 @@ class MotorPanel:
 
 class PeelPanel:
     def __init__(self, parent: tk.Widget, node: PeelGuiNode):
-        self._node  = node
-        self._frame = ttk.Frame(parent)
+        self._node       = node
+        self._frame      = ttk.Frame(parent)
+        self._last_step  = ""   # last non-pause step state; used to derive "next"
         self._build_ui()
 
     @property
     def frame(self) -> ttk.Frame:
         return self._frame
 
+    # ── UI construction ────────────────────────────────────────────
+
     def _build_ui(self):
         pad = {"padx": 12, "pady": 5}
 
-        # ── Peel sequence status header ──
+        # ── Status header ──
         hf = tk.Frame(self._frame, bg="#212121", pady=8)
         hf.grid(row=0, column=0, columnspan=3, sticky="ew")
         tk.Label(hf, text="Peel:", bg="#212121", fg="white",
@@ -442,10 +468,10 @@ class PeelPanel:
                                 fg=PEEL_COLORS["idle"], font=("Helvetica", 14))
         self._h_dot.pack(side="left")
         self._h_lbl = tk.Label(hf, text="idle", bg="#212121", fg="white",
-                                font=("Helvetica", 10, "bold"), width=18, anchor="w")
+                                font=("Helvetica", 10, "bold"), width=20, anchor="w")
         self._h_lbl.pack(side="left", padx=(4, 0))
 
-        # ── Yuzu detection (from image team) ──
+        # ── Yuzu detection ──
         yf = ttk.LabelFrame(self._frame, text="Yuzu Detection  (/yuzu_detected)", padding=10)
         yf.grid(row=1, column=0, columnspan=3, sticky="ew", **pad)
         self._yuzu_dot = tk.Label(yf, text="●", fg="#9e9e9e", font=("Helvetica", 12))
@@ -453,7 +479,7 @@ class PeelPanel:
         self._yuzu_lbl = tk.Label(yf, text="No detection yet", fg="gray", font=("Helvetica", 9))
         self._yuzu_lbl.grid(row=0, column=1, sticky="w")
 
-        # ── Sequence progress — one row per step ──
+        # ── Sequence progress ──
         pf = ttk.LabelFrame(self._frame, text="Sequence Progress  (YuzuSequence.pdf)", padding=10)
         pf.grid(row=2, column=0, columnspan=3, sticky="ew", **pad)
         pf.columnconfigure(2, weight=1)
@@ -461,16 +487,16 @@ class PeelPanel:
         self._step_dots = {}
         self._step_lbls = {}
         for i, (step, (label, motors)) in enumerate(zip(PEEL_STEPS, PEEL_STEP_INFO)):
-            dot = tk.Label(pf, text="○", fg="#9e9e9e", font=("Helvetica", 10))
-            dot.grid(row=i, column=0, sticky="w", padx=(4, 6), pady=1)
+            dot = tk.Label(pf, text="○", fg="#9e9e9e", font=("Helvetica", 11))
+            dot.grid(row=i, column=0, sticky="w", padx=(4, 6), pady=2)
 
             name_lbl = tk.Label(pf, text=label, fg="gray",
                                  font=("Helvetica", 8, "bold"), anchor="w", width=22)
-            name_lbl.grid(row=i, column=1, sticky="w", pady=1)
+            name_lbl.grid(row=i, column=1, sticky="w", pady=2)
 
-            motor_lbl = tk.Label(pf, text=motors, fg="#666666",
+            motor_lbl = tk.Label(pf, text=motors, fg="#555555",
                                   font=("Courier", 8), anchor="w")
-            motor_lbl.grid(row=i, column=2, sticky="w", padx=(4, 0), pady=1)
+            motor_lbl.grid(row=i, column=2, sticky="w", padx=(4, 0), pady=2)
 
             self._step_dots[step] = dot
             self._step_lbls[step] = name_lbl
@@ -478,24 +504,49 @@ class PeelPanel:
         # ── Control buttons ──
         cf = ttk.LabelFrame(self._frame, text="Control", padding=10)
         cf.grid(row=3, column=0, columnspan=3, sticky="ew", **pad)
-        ttk.Button(cf, text="Start Peel", command=self._on_start).pack(
-            side="left", expand=True, fill="x", padx=(0, 6))
-        ttk.Button(cf, text="ABORT", command=self._on_abort).pack(
-            side="left", expand=True, fill="x")
+        cf.columnconfigure(0, weight=1)
+        cf.columnconfigure(1, weight=1)
+
+        # Row 0: start buttons
+        self._btn_auto = ttk.Button(cf, text="▶▶  Start Auto",
+                                    command=self._on_start_auto)
+        self._btn_auto.grid(row=0, column=0, sticky="ew", padx=(0, 4), pady=(0, 4))
+
+        self._btn_manual = ttk.Button(cf, text="▶|  Start Manual",
+                                      command=self._on_start_manual)
+        self._btn_manual.grid(row=0, column=1, sticky="ew", pady=(0, 4))
+
+        # Row 1: step advance + abort
+        self._btn_next = ttk.Button(cf, text="→  Next Step",
+                                    command=self._on_next_step,
+                                    state="disabled")
+        self._btn_next.grid(row=1, column=0, sticky="ew", padx=(0, 4))
+
+        self._btn_abort = ttk.Button(cf, text="■  ABORT",
+                                     command=self._on_abort)
+        self._btn_abort.grid(row=1, column=1, sticky="ew")
 
         # ── Log ──
         self._log = _log_widget(self._frame, row=4)
         _log_print(self._log, "Peel sequence panel ready.  6-motor / 8-step.")
-        _log_print(self._log, "Image team interface:")
-        _log_print(self._log, "  /yuzu_detected  [x_off_mm, y_off_mm, long_mm, short_mm]")
-        _log_print(self._log, "  /peel/start  →  triggers cycle")
-        _log_print(self._log, "  /peel/abort  →  emergency stop all motors")
+        _log_print(self._log, "▶▶ Start Auto   — runs all steps unattended")
+        _log_print(self._log, "▶| Start Manual — pauses after each step; use → Next Step")
+        _log_print(self._log, "Image team: publish /yuzu_detected before starting.")
 
     # ── Handlers ──────────────────────────────────────────────────
 
-    def _on_start(self):
-        self._node.start()
-        _log_print(self._log, ">> /peel/start")
+    def _on_start_auto(self):
+        self._node.start_auto()
+        _log_print(self._log, ">> /peel/start  [auto]")
+
+    def _on_start_manual(self):
+        self._node.start_manual()
+        self._last_step = ""
+        _log_print(self._log, ">> /peel/start_manual  [step-by-step]")
+
+    def _on_next_step(self):
+        self._node.next_step()
+        _log_print(self._log, ">> /peel/next_step")
 
     def _on_abort(self):
         if not messagebox.askyesno("Confirm Abort", "Send ABORT to all motors?"):
@@ -503,7 +554,7 @@ class PeelPanel:
         self._node.abort()
         _log_print(self._log, ">> /peel/abort")
 
-    # ── Updates (called from ROS thread) ──────────────────────────
+    # ── Status updates (called from ROS thread via root.after) ────
 
     def update_peel_status(self, status: str, root: tk.Tk):
         root.after(0, self._apply_peel_status, status)
@@ -514,26 +565,89 @@ class PeelPanel:
         self._h_lbl.config(text=status.replace("_", " "))
         _log_print(self._log, f"<< peel: {status}")
 
-        # Reset all to idle appearance on terminal states
+        # ── Handle terminal / reset states ──
         if status in ("idle", "done", "aborted", "error"):
-            for step in PEEL_STEPS:
-                self._step_dots[step].config(text="○", fg="#9e9e9e")
-                self._step_lbls[step].config(fg="gray", font=("Helvetica", 8, "bold"))
+            self._last_step = ""
+            self._btn_next.config(state="disabled", text="→  Next Step")
+            self._btn_auto.config(state="normal")
+            self._btn_manual.config(state="normal")
+            self._reset_step_dots()
             return
 
-        # Tick completed steps, highlight current, grey out pending
+        # ── Manual pause — operator must press Next Step ──
+        if status == "manual_pause":
+            self._btn_next.config(state="normal",
+                                  text=self._next_step_label())
+            self._btn_auto.config(state="disabled")
+            self._btn_manual.config(state="disabled")
+            self._update_dots_paused()
+            return
+
+        # ── Running a step ──
+        if status in PEEL_STEPS:
+            self._last_step = status
+            self._btn_next.config(state="disabled", text="→  Next Step")
+            self._btn_auto.config(state="disabled")
+            self._btn_manual.config(state="disabled")
+            self._update_dots_running(status)
+
+    def _reset_step_dots(self):
+        for step in PEEL_STEPS:
+            self._step_dots[step].config(text="○", fg="#9e9e9e")
+            self._step_lbls[step].config(fg="gray")
+
+    def _update_dots_running(self, current: str):
+        """Active step = ●pink, completed = ✓green, pending = ○gray."""
         passed = True
         for step in PEEL_STEPS:
-            if step == status:
+            if step == current:
                 self._step_dots[step].config(text="●", fg="#e91e63")
-                self._step_lbls[step].config(fg="white", font=("Helvetica", 8, "bold"))
+                self._step_lbls[step].config(fg="white")
                 passed = False
             elif passed:
                 self._step_dots[step].config(text="✓", fg="#4caf50")
-                self._step_lbls[step].config(fg="#4caf50", font=("Helvetica", 8, "bold"))
+                self._step_lbls[step].config(fg="#4caf50")
             else:
                 self._step_dots[step].config(text="○", fg="#9e9e9e")
-                self._step_lbls[step].config(fg="gray", font=("Helvetica", 8, "bold"))
+                self._step_lbls[step].config(fg="gray")
+
+    def _update_dots_paused(self):
+        """Last step = ✓green, NEXT step = ▷cyan (ready), rest = ○gray."""
+        found_last = self._last_step == ""
+        found_next = False
+        for step in PEEL_STEPS:
+            if not found_last:
+                if step == self._last_step:
+                    self._step_dots[step].config(text="✓", fg="#4caf50")
+                    self._step_lbls[step].config(fg="#4caf50")
+                    found_last = True
+                else:
+                    # steps before last — already done
+                    self._step_dots[step].config(text="✓", fg="#4caf50")
+                    self._step_lbls[step].config(fg="#4caf50")
+            elif not found_next:
+                # This is the next step to execute — highlight in cyan
+                self._step_dots[step].config(text="▷", fg="#ffeb3b")
+                self._step_lbls[step].config(fg="#ffeb3b")
+                found_next = True
+            else:
+                self._step_dots[step].config(text="○", fg="#9e9e9e")
+                self._step_lbls[step].config(fg="gray")
+
+    def _next_step_label(self) -> str:
+        """Return a 'Next Step  ② ...' label for the pending step button."""
+        if not self._last_step:
+            # About to run step 1
+            label, _ = PEEL_STEP_INFO[0]
+            return f"→  Next: {label}"
+        try:
+            idx = PEEL_STEPS.index(self._last_step)
+            if idx + 1 < len(PEEL_STEPS):
+                label, _ = PEEL_STEP_INFO[idx + 1]
+                return f"→  Next: {label}"
+        except ValueError:
+            pass
+        return "→  Next Step"
 
     def update_yuzu_detected(self, data: list, root: tk.Tk):
         root.after(0, self._apply_yuzu, data)
