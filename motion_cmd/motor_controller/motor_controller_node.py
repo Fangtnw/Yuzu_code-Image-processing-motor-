@@ -129,6 +129,36 @@ _SPD_BASE_UMS = 1_000          # µm/s encoded in the baseline frame (= 1 mm/s)
 _SPD_CS_IDX   = (159, 229, 239)
 
 
+# ── Acceleration frame (240 bytes) ────────────────────────────────────────────
+# Bulk register-write that sets the operating acceleration for all 12 data slots.
+# Uses the same 240-byte envelope as the speed frame but targets register 0x0C03
+# (accel) instead of 0x0C02 (speed).  Value unit: 1 count = 1 nm/s² (multiply
+# mm/s² by 1 000 000).  Baseline encodes 700 000 counts = 0.7 mm/s².
+_ACCEL_FRAME = bytes([
+    0xff,0x01,0x00,0x00,0xba,0x00,0xc3,0x01,0xc1,0x29,0x00,0x00,0x00,0x00,0xe1,0x29,  # 000-015
+    0x00,0x00,0x00,0x00,0x01,0x2a,0x00,0x00,0x00,0x00,0x21,0x2a,0x00,0x00,0x00,0x00,  # 016-031
+    0x41,0x2a,0x00,0x00,0x00,0x00,0x00,0xed,0xff,0x00,0x00,0x00,0x00,0x00,0x61,0x2a,  # 032-047
+    0x00,0x00,0x00,0x00,0x81,0x2a,0x00,0x00,0x00,0x00,0xa1,0x2a,0x00,0x00,0x00,0x00,  # 048-063
+    0xc1,0x2a,0x00,0x00,0x00,0x00,0xe1,0x2a,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xb4,  # 064-079
+    0xff,0x00,0x00,0x00,0x01,0x2b,0x00,0x00,0x00,0x00,0x21,0x2b,0x00,0x00,0x00,0x00,  # 080-095
+    0x41,0x2b,0x00,0x00,0x00,0x00,0x61,0x2b,0x00,0x00,0x00,0x00,0x81,0x2b,0x00,0x00,  # 096-111
+    0x00,0x00,0xa1,0x2b,0x00,0x00,0x00,0xdf,0xff,0x00,0x00,0x00,0x00,0x00,0x00,0x00,  # 112-127
+    0xc1,0x2b,0x00,0x00,0x00,0x00,0xe1,0x2b,0x00,0x00,0x00,0x00,0x03,0x0c,0x60,0xae,  # 128-143  <- DS0 reg 0x0C03, val lo at [142:144]
+    0x0a,0x00,0x23,0x0c,0x60,0xae,0x0a,0x00,0x43,0x0c,0x60,0xae,0x0a,0x00,0x00,0x74,  # 144-159  <- val hi at [144:146], CS[159]
+    0xff,0x00,0x00,0x00,0x00,0x00,0x63,0x0c,0x60,0xae,0x0a,0x00,0x83,0x0c,0x60,0xae,  # 160-175
+    0x0a,0x00,0xa3,0x0c,0x60,0xae,0x0a,0x00,0xc3,0x0c,0x60,0xae,0x0a,0x00,0xe3,0x0c,  # 176-191
+    0x60,0xae,0x0a,0x00,0x00,0x00,0x00,0x7a,0xff,0x02,0x00,0x00,0x03,0x0d,0x60,0xae,  # 192-207
+    0x0a,0x00,0x23,0x0d,0x60,0xae,0x0a,0x00,0x43,0x0d,0x60,0xae,0x0a,0x00,0x63,0x0d,  # 208-223
+    0x60,0xae,0x0a,0x00,0x00,0x58,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x8b,  # 224-239  <- CS[229], CS[239]
+])
+assert len(_ACCEL_FRAME) == 240, "Acceleration frame length mismatch"
+
+_ACL_LO_IDX    = 142            # byte index of DS0 accel low word (bytes 0-1)
+_ACL_HI_IDX    = 144            # byte index of DS0 accel high word (bytes 2-3)
+_ACL_BASE_RAW  = 700_000        # nm/s² encoded in baseline frame (= 0.7 mm/s²)
+_ACL_CS_IDX    = (159, 229, 239)
+
+
 # ── Execute frames (40 bytes each) ────────────────────────────────────────────
 # Sent after the position/speed frames to trigger the loaded motion.
 _EXEC_FRAMES: tuple[bytes, ...] = (
@@ -221,10 +251,34 @@ def _build_speed_frame(speed_mms: float) -> bytes:
     return bytes(frame)
 
 
-def _move_payloads(position_mm: float, speed_mms: float) -> List[bytes]:
+def _build_accel_frame(accel_mms2: float) -> bytes:
+    """
+    Return a patched copy of *_ACCEL_FRAME* encoding *accel_mms2*.
+
+    Args:
+        accel_mms2: Acceleration in mm/s² (must be > 0).
+
+    Returns:
+        240-byte frame with updated acceleration value and checksums.
+    """
+    accel_raw  = int(round(accel_mms2 * 1_000_000))
+    new_bytes  = struct.pack("<i", accel_raw)
+    base_bytes = struct.pack("<i", _ACL_BASE_RAW)
+    xor_delta  = _xor_of(base_bytes) ^ _xor_of(new_bytes)
+
+    frame = bytearray(_ACCEL_FRAME)
+    frame[_ACL_LO_IDX : _ACL_LO_IDX + 2] = new_bytes[0:2]
+    frame[_ACL_HI_IDX : _ACL_HI_IDX + 2] = new_bytes[2:4]
+    for idx in _ACL_CS_IDX:
+        frame[idx] ^= xor_delta
+    return bytes(frame)
+
+
+def _move_payloads(position_mm: float, speed_mms: float, accel_mms2: float) -> List[bytes]:
     """Return the ordered frame sequence for an absolute move command."""
     return [
         _SYNC,
+        _build_accel_frame(accel_mms2),
         _build_position_frame(position_mm),
         _build_speed_frame(speed_mms),
         _SYNC,
@@ -314,7 +368,6 @@ class MotorControllerNode(Node):
         self._hb_interval    = self.get_parameter("heartbeat_interval").value
         self._motor_id       = self.get_parameter("motor_id").value
         self._last_pos_mm    = 0.0
-        self._warned_usb_accel = False
 
         self._serial_lock      = threading.Lock()
         self._stop_hb          = threading.Event()
@@ -384,20 +437,13 @@ class MotorControllerNode(Node):
             )
             return
 
-        if (len(msg.data) >= 3 or len(msg.data) >= 4) and not self._warned_usb_accel:
-            self.get_logger().warning(
-                f"[{self._motor_id}] USB MEXE02 control uses accel/decel only for timing "
-                "math right now; driver-side accel frames are not captured yet."
-            )
-            self._warned_usb_accel = True
-
         self.get_logger().info(
             f"[{self._motor_id}] Move -> {pos_mm:.2f} mm @ {spd_mms:.2f} mm/s  "
             f"(accel={accel_mms2:.2f} mm/s^2  decel={decel_mms2:.2f} mm/s^2"
             + (f"  time={duration_s:.3f} s" if duration_s > 0.0 else "")
             + ")"
         )
-        self._execute(_move_payloads(pos_mm, spd_mms))
+        self._execute(_move_payloads(pos_mm, spd_mms, accel_mms2))
         self._last_pos_mm = pos_mm
 
     def _on_home_v2(self, _msg: Empty) -> None:
@@ -429,7 +475,7 @@ class MotorControllerNode(Node):
         self.get_logger().info(
             f"[{self._motor_id}] Move → {pos_mm:.2f} mm @ {spd_mms:.2f} mm/s"
         )
-        self._execute(_move_payloads(pos_mm, spd_mms))
+        self._execute(_move_payloads(pos_mm, spd_mms, self._default_accel))
 
     def _on_home(self, _msg: Empty) -> None:
         self.get_logger().info(f"[{self._motor_id}] Homing (ZHOME)…")
