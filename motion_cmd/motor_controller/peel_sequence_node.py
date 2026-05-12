@@ -83,10 +83,9 @@ class PeelSequenceNode(Node):
         self.declare_parameter("z_lower_pos_mm",             25.0)
         self.declare_parameter("z_lower_speed_mms",          15.0)
         self.declare_parameter("z_lower_wait_s",              2.0)
-        # Peeler positioning (Motor⑤): spins for this long to reach 90°
-        # 0.25 rev at 20 rpm = 0.75 s
-        self.declare_parameter("peeler_position_rot_s",       0.75)
-        self.declare_parameter("peeler_position_wait_s",      0.3)
+        # Peeler positioning (Motor⑤): angle position command to reach 90°
+        self.declare_parameter("peeler_position_angle_deg",  90.0)   # target angle for Step 3
+        self.declare_parameter("peeler_position_wait_s",      1.0)   # time to complete 90° move + settle
         # Step 4 — rotation + feed
         self.declare_parameter("yuzu_rotation_rpm",         225.0)   # Motor② 200-250 rpm
         self.declare_parameter("yuzu_rotation_accel_rpm_s",  50.0)   # ramp up
@@ -122,9 +121,15 @@ class PeelSequenceNode(Node):
             # Motor④: Peeler feed bottom — Type 1
             "peeler4_cmd":   self.create_publisher(Float32MultiArray, "/motor_peeler_4/motor_cmd",  10),
             "peeler4_home":  self.create_publisher(Empty,             "/motor_peeler_4/motor_home", 10),
-            # Motor⑤: Peeler orbit — Type 2 [rpm, accel_rpm_s, decel_rpm_s]
-            "orbit_spin":    self.create_publisher(Float32MultiArray, "/motor_peeler_orbit/motor_spin", 10),
-            "orbit_stop":    self.create_publisher(Empty,             "/motor_peeler_orbit/motor_stop", 10),
+            # Motor⑤: Peeler orbit — hybrid: angle position (Step 3) + velocity (Step 4)
+            #   motor_angle_cmd [Float32MultiArray: angle_deg, speed_rpm, accel_rpm_s?, decel_rpm_s?]
+            #   motor_home      [Empty]  → return to 0°
+            #   motor_spin      [Float32MultiArray: rpm, accel_rpm_s, decel_rpm_s]
+            #   motor_stop      [Empty]
+            "orbit_angle_cmd": self.create_publisher(Float32MultiArray, "/motor_peeler_orbit/motor_angle_cmd", 10),
+            "orbit_home":      self.create_publisher(Empty,             "/motor_peeler_orbit/motor_home",      10),
+            "orbit_spin":      self.create_publisher(Float32MultiArray, "/motor_peeler_orbit/motor_spin",      10),
+            "orbit_stop":      self.create_publisher(Empty,             "/motor_peeler_orbit/motor_stop",      10),
             # Motor⑥: Conveyor — Type 1; cumulative position tracks tray count
             "conveyor_cmd":  self.create_publisher(Float32MultiArray, "/motor_conveyor/motor_cmd",  10),
             "conveyor_home": self.create_publisher(Empty,             "/motor_conveyor/motor_home", 10),
@@ -238,11 +243,11 @@ class PeelSequenceNode(Node):
             if not self._wait_step(p["z_lower_wait_s"]): return
 
             # ── Step 3: Peeler positioning — Motor⑤ 90° ROT ───────────
+            # Use absolute angle command (ABZO encoder) — reliable vs. timed velocity
             self._set_state("peeler_positioning")
-            self._send_rpm("orbit_spin", p["peeler_orbit_rpm"],
-                           p["peeler_orbit_accel_rpm_s"], p["peeler_orbit_decel_rpm_s"])
-            if not self._wait(p["peeler_position_rot_s"]): return   # intra-step timing
-            self._pub["orbit_stop"].publish(Empty())
+            self._send_angle("orbit_angle_cmd", p["peeler_position_angle_deg"],
+                             p["peeler_orbit_rpm"],
+                             p["peeler_orbit_accel_rpm_s"], p["peeler_orbit_decel_rpm_s"])
             if not self._wait_step(p["peeler_position_wait_s"]): return
 
             # ── Step 4: Rotation + feed — ①②③ sub-steps ──────────────
@@ -293,7 +298,7 @@ class PeelSequenceNode(Node):
         names = [
             "conveyor_settle_s", "conveyor_advance_mm", "conveyor_speed_mms",
             "z_lower_pos_mm", "z_lower_speed_mms", "z_lower_wait_s",
-            "peeler_position_rot_s", "peeler_position_wait_s",
+            "peeler_position_angle_deg", "peeler_position_wait_s",
             "yuzu_rotation_rpm", "yuzu_rotation_accel_rpm_s", "yuzu_rotation_decel_rpm_s",
             "spin_up_wait_s",
             "peeler_advance_mm", "peeler_advance_speed_mms", "peeler_advance_wait_s",
@@ -315,6 +320,19 @@ class PeelSequenceNode(Node):
         effective_decel = decel_rpm_s if decel_rpm_s > 0.0 else accel_rpm_s
         msg = Float32MultiArray()
         msg.data = [float(rpm), float(accel_rpm_s), float(effective_decel)]
+        self._pub[key].publish(msg)
+
+    def _send_angle(self, key: str, angle_deg: float, speed_rpm: float,
+                    accel_rpm_s: float = 0.0, decel_rpm_s: float = 0.0):
+        """Publish a rotary position command: [angle_deg, speed_rpm, accel_rpm_s, decel_rpm_s].
+
+        Used for Motor⑤ Step 3 (90° absolute position via ABZO encoder).
+        Positive angle = CW; motor driver interprets relative to its home position.
+        """
+        effective_decel = decel_rpm_s if decel_rpm_s > 0.0 else accel_rpm_s
+        msg = Float32MultiArray()
+        msg.data = [float(angle_deg), float(speed_rpm),
+                    float(accel_rpm_s), float(effective_decel)]
         self._pub[key].publish(msg)
 
     def _wait(self, duration_s: float) -> bool:
@@ -344,6 +362,7 @@ class PeelSequenceNode(Node):
     def _emergency_stop(self):
         self._pub["yuzu_stop"].publish(Empty())
         self._pub["orbit_stop"].publish(Empty())
+        self._pub["orbit_home"].publish(Empty())
         self._pub["z_home"].publish(Empty())
         self._pub["peeler3_home"].publish(Empty())
         self._pub["peeler4_home"].publish(Empty())

@@ -39,6 +39,15 @@ Parameters
   spin_down_time_s  (float) — simulated spin-down delay before "idle"    (default 0.2)
   move_time_s       (float) — simulated travel time before "idle"        (default 1.0)
   move_settle_s     (float) — extra settle delay after move completes    (default 0.1)
+
+Rotary position (Motor⑤ only)
+--------------------------------------------------------------------
+  ~/motor_angle_cmd [std_msgs/Float32MultiArray]
+                  data[0]  target_angle_deg
+                  data[1]  speed_rpm
+                  data[2]  accel_rpm_s   (optional)
+                  data[3]  decel_rpm_s   (optional)
+  ~/motor_home is shared with Type 1 — returns rotary axis to 0°
 """
 
 import threading
@@ -68,12 +77,15 @@ class MotorStubNode(Node):
         self._status_pub = self.create_publisher(String, "motor_status", 10)
 
         # Type 1 — linear position control
-        self.create_subscription(Float32MultiArray, "motor_cmd",  self._on_cmd,  10)
-        self.create_subscription(Empty,             "motor_home", self._on_home, 10)
+        self.create_subscription(Float32MultiArray, "motor_cmd",       self._on_cmd,       10)
+        self.create_subscription(Empty,             "motor_home",      self._on_home,      10)
 
         # Type 2 — rotary velocity control
-        self.create_subscription(Float32MultiArray, "motor_spin", self._on_spin, 10)
-        self.create_subscription(Empty,             "motor_stop", self._on_stop, 10)
+        self.create_subscription(Float32MultiArray, "motor_spin",      self._on_spin,      10)
+        self.create_subscription(Empty,             "motor_stop",      self._on_stop,      10)
+
+        # Rotary position control (Motor⑤ peeler orbit — angle positioning)
+        self.create_subscription(Float32MultiArray, "motor_angle_cmd", self._on_angle_cmd, 10)
 
         self._current_pos_mm = 0.0
         self._current_rpm    = 0.0
@@ -122,6 +134,28 @@ class MotorStubNode(Node):
             self._current_pos_mm = 0.0
         self.get_logger().info(
             f"[{self._motor_id}] HOME — returning to zero (sim {self._move_time:.2f}s)"
+        )
+        self._publish_status("running")
+        threading.Timer(
+            self._move_time + self._move_settle,
+            lambda: self._publish_status("idle"),
+        ).start()
+
+    def _on_angle_cmd(self, msg: Float32MultiArray):
+        """Rotary absolute position command: [angle_deg, speed_rpm, accel?, decel?]."""
+        if len(msg.data) < 2:
+            self.get_logger().warn(
+                f"[{self._motor_id}] motor_angle_cmd needs at least [angle_deg, speed_rpm]"
+            )
+            return
+        angle_deg = msg.data[0]
+        speed_rpm = msg.data[1]
+        accel     = msg.data[2] if len(msg.data) > 2 else 0.0
+        decel     = msg.data[3] if len(msg.data) > 3 else accel
+
+        self.get_logger().info(
+            f"[{self._motor_id}] ANGLE  target={angle_deg:.1f}°  spd={speed_rpm:.1f} rpm  "
+            f"accel={accel:.1f}  decel={decel:.1f}  (sim {self._move_time:.2f}s)"
         )
         self._publish_status("running")
         threading.Timer(

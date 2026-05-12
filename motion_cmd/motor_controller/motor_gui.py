@@ -45,9 +45,10 @@ MOTORS = [
     {
         "label":               "Peeler Orbit (M⑤)",
         "ns":                  "motor_peeler_orbit",
-        "type":                "rotary",
+        "type":                "rotary_servo",   # position (angle) + velocity (continuous spin)
+        "default_angle_deg":   90.0,
         "default_rpm":         20.0,
-        "rpm_hint":            "spec: 20 rpm  CW (pos: 90° ROT)",
+        "rpm_hint":            "spec: 20 rpm  CW",
         "default_accel_rpm_s": 20.0,
         "default_decel_rpm_s":  0.0,
     },
@@ -136,6 +137,12 @@ class MotorGuiNode(Node):
         elif motor_type == "rotary":
             self._spin_pub = self.create_publisher(Float32MultiArray, "motor_spin", 10)
             self._stop_pub = self.create_publisher(Empty,             "motor_stop", 10)
+        elif motor_type == "rotary_servo":
+            # Angle position AND continuous velocity — used by Motor⑤ (peeler orbit)
+            self._angle_pub = self.create_publisher(Float32MultiArray, "motor_angle_cmd", 10)
+            self._home_pub  = self.create_publisher(Empty,             "motor_home",      10)
+            self._spin_pub  = self.create_publisher(Float32MultiArray, "motor_spin",      10)
+            self._stop_pub  = self.create_publisher(Empty,             "motor_stop",      10)
 
         self.create_subscription(String, "motor_status", lambda m: status_callback(m.data), 10)
 
@@ -167,6 +174,13 @@ class MotorGuiNode(Node):
 
     def send_stop(self):
         self._stop_pub.publish(Empty())
+
+    def send_angle_cmd(self, angle_deg: float, speed_rpm: float,
+                       accel_rpm_s: float = 0.0, decel_rpm_s: float = 0.0):
+        effective_decel = decel_rpm_s if decel_rpm_s > 0.0 else accel_rpm_s
+        msg = Float32MultiArray()
+        msg.data = [angle_deg, speed_rpm, accel_rpm_s, effective_decel]
+        self._angle_pub.publish(msg)
 
 
 class PeelGuiNode(Node):
@@ -259,6 +273,8 @@ class MotorPanel:
             self._build_linear(pad)
         elif self._type == "rotary":
             self._build_rotary(pad)
+        elif self._type == "rotary_servo":
+            self._build_rotary_servo(pad)
 
         self._log = _log_widget(self._frame, row=3)
         _log_print(self._log, "Panel ready.")
@@ -326,6 +342,75 @@ class MotorPanel:
         ttk.Button(bf, text="Stop", command=self._on_stop).pack(side="left", expand=True, fill="x")
 
         tk.Frame(self._frame, height=1).grid(row=2)
+
+    def _build_rotary_servo(self, pad):
+        """Panel for Motor⑤ — both absolute angle positioning AND continuous velocity."""
+        default_angle = self._cfg.get("default_angle_deg",  90.0)
+        default_rpm   = self._cfg.get("default_rpm",         20.0)
+        rpm_hint      = self._cfg.get("rpm_hint", f"0 - {MAX_RPM}")
+        default_accel = self._cfg.get("default_accel_rpm_s",  0.0)
+        default_decel = self._cfg.get("default_decel_rpm_s",  0.0)
+
+        # ── Angle position command (Step 3: 90° ROT) ──
+        af = ttk.LabelFrame(self._frame, text="Angle Position Command  (Step 3: 90° ROT)", padding=12)
+        af.grid(row=1, column=0, columnspan=3, sticky="ew", **pad)
+
+        tk.Label(af, text="Angle (deg)").grid(row=0, column=0, sticky="w", pady=4)
+        self._angle_deg_var = tk.StringVar(value=str(default_angle))
+        ttk.Entry(af, textvariable=self._angle_deg_var, width=10).grid(row=0, column=1, sticky="w", padx=(8, 0))
+        tk.Label(af, text="absolute from home  (+CW)", fg="gray").grid(row=0, column=2, sticky="w", padx=(6, 0))
+
+        tk.Label(af, text="Speed (rpm)").grid(row=1, column=0, sticky="w", pady=4)
+        self._angle_speed_rpm_var = tk.StringVar(value=str(default_rpm))
+        ttk.Entry(af, textvariable=self._angle_speed_rpm_var, width=10).grid(row=1, column=1, sticky="w", padx=(8, 0))
+        tk.Label(af, text=rpm_hint, fg="gray").grid(row=1, column=2, sticky="w", padx=(6, 0))
+
+        tk.Label(af, text="Accel (rpm/s)").grid(row=2, column=0, sticky="w", pady=4)
+        self._angle_accel_rpm_var = tk.StringVar(value=str(default_accel))
+        ttk.Entry(af, textvariable=self._angle_accel_rpm_var, width=10).grid(row=2, column=1, sticky="w", padx=(8, 0))
+        tk.Label(af, text=f"[{MIN_RPM_ACCEL:.0f} - {MAX_RPM_ACCEL:.0f}]  0 = instant",
+                 fg="gray").grid(row=2, column=2, sticky="w", padx=(6, 0))
+
+        tk.Label(af, text="Decel (rpm/s)").grid(row=3, column=0, sticky="w", pady=4)
+        self._angle_decel_rpm_var = tk.StringVar(value=str(default_decel))
+        ttk.Entry(af, textvariable=self._angle_decel_rpm_var, width=10).grid(row=3, column=1, sticky="w", padx=(8, 0))
+        tk.Label(af, text="0 = same as accel",
+                 fg="gray").grid(row=3, column=2, sticky="w", padx=(6, 0))
+
+        abf = tk.Frame(af)
+        abf.grid(row=4, column=0, columnspan=3, pady=(10, 0), sticky="ew")
+        ttk.Button(abf, text="Send Angle", command=self._on_send_angle).pack(
+            side="left", expand=True, fill="x", padx=(0, 4))
+        ttk.Button(abf, text="Home (0°)", command=self._on_home).pack(
+            side="left", expand=True, fill="x")
+
+        # ── Continuous rotation command (Step 4: CW orbit) ──
+        vf = ttk.LabelFrame(self._frame, text="Continuous Rotation  (Step 4: CW orbit)", padding=12)
+        vf.grid(row=2, column=0, columnspan=3, sticky="ew", **pad)
+
+        tk.Label(vf, text="Speed (rpm)").grid(row=0, column=0, sticky="w", pady=4)
+        self._rpm_var = tk.StringVar(value=str(default_rpm))
+        ttk.Entry(vf, textvariable=self._rpm_var, width=10).grid(row=0, column=1, sticky="w", padx=(8, 0))
+        tk.Label(vf, text=rpm_hint, fg="gray").grid(row=0, column=2, sticky="w", padx=(6, 0))
+
+        tk.Label(vf, text="Accel (rpm/s)").grid(row=1, column=0, sticky="w", pady=4)
+        self._accel_rpm_var = tk.StringVar(value=str(default_accel))
+        ttk.Entry(vf, textvariable=self._accel_rpm_var, width=10).grid(row=1, column=1, sticky="w", padx=(8, 0))
+        tk.Label(vf, text=f"[{MIN_RPM_ACCEL:.0f} - {MAX_RPM_ACCEL:.0f}]  0 = instant",
+                 fg="gray").grid(row=1, column=2, sticky="w", padx=(6, 0))
+
+        tk.Label(vf, text="Decel (rpm/s)").grid(row=2, column=0, sticky="w", pady=4)
+        self._decel_rpm_var = tk.StringVar(value=str(default_decel))
+        ttk.Entry(vf, textvariable=self._decel_rpm_var, width=10).grid(row=2, column=1, sticky="w", padx=(8, 0))
+        tk.Label(vf, text="0 = same as accel",
+                 fg="gray").grid(row=2, column=2, sticky="w", padx=(6, 0))
+
+        vbf = tk.Frame(vf)
+        vbf.grid(row=3, column=0, columnspan=3, pady=(10, 0), sticky="ew")
+        ttk.Button(vbf, text="Spin", command=self._on_spin).pack(
+            side="left", expand=True, fill="x", padx=(0, 4))
+        ttk.Button(vbf, text="Stop", command=self._on_stop).pack(
+            side="left", expand=True, fill="x")
 
     # ── Handlers ──────────────────────────────────────────────────
 
@@ -400,8 +485,34 @@ class MotorPanel:
         if not messagebox.askyesno("Confirm Homing", "Send homing command?"):
             return
         self._node.send_home()
-        self._last_pos_mm = 0.0
+        if self._type == "linear":
+            self._last_pos_mm = 0.0
         _log_print(self._log, ">> motor_home")
+
+    def _on_send_angle(self):
+        try:
+            angle = float(self._angle_deg_var.get().strip())
+            speed = float(self._angle_speed_rpm_var.get().strip())
+            accel = float(self._angle_accel_rpm_var.get().strip())
+            decel = float(self._angle_decel_rpm_var.get().strip())
+        except ValueError:
+            messagebox.showerror("Invalid Input", "All angle command fields must be numbers.")
+            return
+        if not (0.0 <= speed <= MAX_RPM):
+            messagebox.showerror("Out of Range", f"Speed must be 0 - {MAX_RPM} rpm.")
+            return
+        if not (MIN_RPM_ACCEL <= accel <= MAX_RPM_ACCEL):
+            messagebox.showerror("Out of Range",
+                                 f"Accel must be {MIN_RPM_ACCEL:.0f} - {MAX_RPM_ACCEL:.0f} rpm/s.")
+            return
+        if not (MIN_RPM_ACCEL <= decel <= MAX_RPM_ACCEL):
+            messagebox.showerror("Out of Range",
+                                 f"Decel must be {MIN_RPM_ACCEL:.0f} - {MAX_RPM_ACCEL:.0f} rpm/s.")
+            return
+        self._node.send_angle_cmd(angle, speed, accel, decel)
+        _log_print(self._log,
+                   f">> motor_angle_cmd  angle={angle:.1f}°  "
+                   f"speed={speed:.1f} rpm  accel={accel:.1f}  decel={decel:.1f}")
 
     def _on_spin(self):
         try:
