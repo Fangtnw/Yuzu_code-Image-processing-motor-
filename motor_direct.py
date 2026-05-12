@@ -22,17 +22,11 @@ Prompt commands
 
     h                 home (ZHOME)
     dwell <seconds>   pause (no motor command, just waits)
-    set accel <val>   update acceleration assumption used for time estimates
+    set accel <val>   set hardware acceleration ramp (mm/s²) — sent to driver
+    set decel <val>   set hardware deceleration ramp (mm/s²) — sent to driver
     s                 show status (port, heartbeat, last command)
     ?                 show this help
     q  (or Ctrl-C)    quit
-
-Acceleration note
-─────────────────
-    `set accel` changes the value used for travel-time estimates ONLY.
-    The driver's actual acceleration ramp is set in MEXE02 software.
-    Adding true hardware acceleration control requires capturing a new
-    MEXE02 HTML log with a custom acceleration value — see code comments.
 
 Dependencies
 ────────────
@@ -131,6 +125,56 @@ _SPD_HI_IDX   = 144
 _SPD_BASE_UMS = 1_000
 _SPD_CS_IDX   = (159, 229, 239)
 
+# ── Acceleration frame (240 bytes) ────────────────────────────────────────────
+# Register 0x0C03+0x20n (12 data slots).  Unit: 1 nm/s² → multiply mm/s² × 1 000 000.
+# Baseline encodes 1 000 000 counts = 1.0 mm/s².  Checksums at 159, 229, 239.
+_ACCEL_FRAME = bytes([
+    0xff,0x01,0x00,0x00,0xba,0x00,0xc3,0x01,0xc1,0x29,0x00,0x00,0x00,0x00,0xe1,0x29,  # 000-015
+    0x00,0x00,0x00,0x00,0x01,0x2a,0x00,0x00,0x00,0x00,0x21,0x2a,0x00,0x00,0x00,0x00,  # 016-031
+    0x41,0x2a,0x00,0x00,0x00,0x00,0x00,0xed,0xff,0x00,0x00,0x00,0x00,0x00,0x61,0x2a,  # 032-047
+    0x00,0x00,0x00,0x00,0x81,0x2a,0x00,0x00,0x00,0x00,0xa1,0x2a,0x00,0x00,0x00,0x00,  # 048-063
+    0xc1,0x2a,0x00,0x00,0x00,0x00,0xe1,0x2a,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xb4,  # 064-079
+    0xff,0x00,0x00,0x00,0x01,0x2b,0x00,0x00,0x00,0x00,0x21,0x2b,0x00,0x00,0x00,0x00,  # 080-095
+    0x41,0x2b,0x00,0x00,0x00,0x00,0x61,0x2b,0x00,0x00,0x00,0x00,0x81,0x2b,0x00,0x00,  # 096-111
+    0x00,0x00,0xa1,0x2b,0x00,0x00,0x00,0xdf,0xff,0x00,0x00,0x00,0x00,0x00,0x00,0x00,  # 112-127
+    0xc1,0x2b,0x00,0x00,0x00,0x00,0xe1,0x2b,0x00,0x00,0x00,0x00,0x03,0x0c,0x40,0x42,  # 128-143  <- DS0 reg 0x0C03
+    0x0f,0x00,0x23,0x0c,0x40,0x42,0x0f,0x00,0x43,0x0c,0x40,0x42,0x0f,0x00,0x00,0xbd,  # 144-159  <- CS[159]
+    0xff,0x00,0x00,0x00,0x00,0x00,0x63,0x0c,0x40,0x42,0x0f,0x00,0x83,0x0c,0x40,0x42,  # 160-175
+    0x0f,0x00,0xa3,0x0c,0x40,0x42,0x0f,0x00,0xc3,0x0c,0x40,0x42,0x0f,0x00,0xe3,0x0c,  # 176-191
+    0x40,0x42,0x0f,0x00,0x00,0x00,0x00,0x7a,0xff,0x02,0x00,0x00,0x03,0x0d,0x40,0x42,  # 192-207
+    0x0f,0x00,0x23,0x0d,0x40,0x42,0x0f,0x00,0x43,0x0d,0x40,0x42,0x0f,0x00,0x63,0x0d,  # 208-223
+    0x40,0x42,0x0f,0x00,0x00,0x58,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x42,  # 224-239  <- CS[229], CS[239]
+])
+_ACL_LO_IDX   = 142
+_ACL_HI_IDX   = 144
+_ACL_BASE_RAW = 1_000_000   # nm/s² = 1.0 mm/s²
+_ACL_CS_IDX   = (159, 229, 239)
+
+# ── Deceleration frame (240 bytes) ────────────────────────────────────────────
+# Register 0x0C04+0x20n.  Same envelope as accel, reg addresses +1.
+# Baseline encodes 1 000 000 counts = 1.0 mm/s².  Checksums at 159, 229, 239.
+_DECEL_FRAME = bytes([
+    0xff,0x01,0x00,0x00,0xba,0x00,0xc3,0x01,0xc1,0x29,0x00,0x00,0x00,0x00,0xe1,0x29,  # 000-015
+    0x00,0x00,0x00,0x00,0x01,0x2a,0x00,0x00,0x00,0x00,0x21,0x2a,0x00,0x00,0x00,0x00,  # 016-031
+    0x41,0x2a,0x00,0x00,0x00,0x00,0x00,0xed,0xff,0x00,0x00,0x00,0x00,0x00,0x61,0x2a,  # 032-047
+    0x00,0x00,0x00,0x00,0x81,0x2a,0x00,0x00,0x00,0x00,0xa1,0x2a,0x00,0x00,0x00,0x00,  # 048-063
+    0xc1,0x2a,0x00,0x00,0x00,0x00,0xe1,0x2a,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0xb4,  # 064-079
+    0xff,0x00,0x00,0x00,0x01,0x2b,0x00,0x00,0x00,0x00,0x21,0x2b,0x00,0x00,0x00,0x00,  # 080-095
+    0x41,0x2b,0x00,0x00,0x00,0x00,0x61,0x2b,0x00,0x00,0x00,0x00,0x81,0x2b,0x00,0x00,  # 096-111
+    0x00,0x00,0xa1,0x2b,0x00,0x00,0x00,0xdf,0xff,0x00,0x00,0x00,0x00,0x00,0x00,0x00,  # 112-127
+    0xc1,0x2b,0x00,0x00,0x00,0x00,0xe1,0x2b,0x00,0x00,0x00,0x00,0x04,0x0c,0x40,0x42,  # 128-143  <- DS0 reg 0x0C04
+    0x0f,0x00,0x24,0x0c,0x40,0x42,0x0f,0x00,0x44,0x0c,0x40,0x42,0x0f,0x00,0x00,0xba,  # 144-159  <- CS[159]
+    0xff,0x00,0x00,0x00,0x00,0x00,0x64,0x0c,0x40,0x42,0x0f,0x00,0x84,0x0c,0x40,0x42,  # 160-175
+    0x0f,0x00,0xa4,0x0c,0x40,0x42,0x0f,0x00,0xc4,0x0c,0x40,0x42,0x0f,0x00,0xe4,0x0c,  # 176-191
+    0x40,0x42,0x0f,0x00,0x00,0x00,0x00,0x7a,0xff,0x02,0x00,0x00,0x04,0x0d,0x40,0x42,  # 192-207
+    0x0f,0x00,0x24,0x0d,0x40,0x42,0x0f,0x00,0x44,0x0d,0x40,0x42,0x0f,0x00,0x64,0x0d,  # 208-223
+    0x40,0x42,0x0f,0x00,0x00,0x58,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x00,0x45,  # 224-239  <- CS[229], CS[239]
+])
+_DCL_LO_IDX   = 142
+_DCL_HI_IDX   = 144
+_DCL_BASE_RAW = 1_000_000   # nm/s² = 1.0 mm/s²
+_DCL_CS_IDX   = (159, 229, 239)
+
 # ── Execute frames (2 × 40 bytes) ─────────────────────────────────────────────
 _EXEC_FRAMES = (
     bytes([
@@ -167,20 +211,12 @@ MAX_SPD_MMS = 100.0
 FRAME_DELAY = 0.10   # seconds between frame writes
 HB_INTERVAL = 0.20   # heartbeat period
 
-# ── Default acceleration assumption for time estimates ─────────────────────────
-# The driver's actual acceleration ramp is configured in MEXE02 and is NOT
-# changed by this script.  This constant is used only for travel-time estimates.
-#
-# TODO — hardware acceleration control:
-#   The AZ series stores acceleration (starting rate) at register 0x0C03 + 0x20*n
-#   and deceleration (stopping rate) at 0x0C04 + 0x20*n — one address step above
-#   the speed register (0x0C02 + 0x20*n).  To add control:
-#   1. In MEXE02, set a specific acceleration value and save the comm log as HTML.
-#   2. Extract the frame bytes from that HTML (same process as for write25mm.html
-#      and 1mms.html).
-#   3. Hardcode the baseline frame + patch offsets here, following the same
-#      XOR-delta checksum pattern used by _build_speed_frame().
-DEFAULT_ACCEL_MMS2 = 50.0   # mm/s² — tune to match your MEXE02 setting
+# ── Default hardware accel / decel ────────────────────────────────────────────
+# Sent to the driver on every move via _build_accel_frame / _build_decel_frame.
+# Override at runtime with  set accel <val>  /  set decel <val>  in the REPL,
+# or via the --accel / --decel CLI flags.
+DEFAULT_ACCEL_MMS2 = 1.0   # mm/s²
+DEFAULT_DECEL_MMS2 = 1.0   # mm/s²
 
 
 # ── Frame builders ─────────────────────────────────────────────────────────────
@@ -217,9 +253,43 @@ def _build_speed_frame(speed_mms: float) -> bytes:
     return bytes(frame)
 
 
-def _move_payloads(pos_mm: float, spd_mms: float) -> List[bytes]:
-    return [_SYNC, _build_position_frame(pos_mm), _build_speed_frame(spd_mms),
-            _SYNC, *_EXEC_FRAMES]
+def _build_accel_frame(accel_mms2: float) -> bytes:
+    accel_raw  = int(round(accel_mms2 * 1_000_000))
+    new_bytes  = struct.pack("<i", accel_raw)
+    base_bytes = struct.pack("<i", _ACL_BASE_RAW)
+    delta      = _xor_of(base_bytes) ^ _xor_of(new_bytes)
+    frame      = bytearray(_ACCEL_FRAME)
+    frame[_ACL_LO_IDX : _ACL_LO_IDX + 2] = new_bytes[0:2]
+    frame[_ACL_HI_IDX : _ACL_HI_IDX + 2] = new_bytes[2:4]
+    for idx in _ACL_CS_IDX:
+        frame[idx] ^= delta
+    return bytes(frame)
+
+
+def _build_decel_frame(decel_mms2: float) -> bytes:
+    decel_raw  = int(round(decel_mms2 * 1_000_000))
+    new_bytes  = struct.pack("<i", decel_raw)
+    base_bytes = struct.pack("<i", _DCL_BASE_RAW)
+    delta      = _xor_of(base_bytes) ^ _xor_of(new_bytes)
+    frame      = bytearray(_DECEL_FRAME)
+    frame[_DCL_LO_IDX : _DCL_LO_IDX + 2] = new_bytes[0:2]
+    frame[_DCL_HI_IDX : _DCL_HI_IDX + 2] = new_bytes[2:4]
+    for idx in _DCL_CS_IDX:
+        frame[idx] ^= delta
+    return bytes(frame)
+
+
+def _move_payloads(pos_mm: float, spd_mms: float,
+                   accel_mms2: float, decel_mms2: float) -> List[bytes]:
+    return [
+        _SYNC,
+        _build_accel_frame(accel_mms2),
+        _build_decel_frame(decel_mms2),
+        _build_position_frame(pos_mm),
+        _build_speed_frame(spd_mms),
+        _SYNC,
+        *_EXEC_FRAMES,
+    ]
 
 
 def _home_payloads() -> List[bytes]:
@@ -310,7 +380,8 @@ class MotorDriver:
 
     def move(self, pos_mm: float, spd_mms: float,
              wait_s: Optional[float] = None,
-             accel_mms2: float = DEFAULT_ACCEL_MMS2) -> None:
+             accel_mms2: float = DEFAULT_ACCEL_MMS2,
+             decel_mms2: float = DEFAULT_DECEL_MMS2) -> None:
         """
         Send an absolute move command, then optionally wait for completion.
 
@@ -320,18 +391,23 @@ class MotorDriver:
             wait_s     : Seconds to wait after sending frames.
                          None  → return immediately (heartbeat keeps motor alive).
                          value → block for that many seconds, then return.
+            accel_mms2 : Hardware acceleration ramp in mm/s² (sent to driver).
+            decel_mms2 : Hardware deceleration ramp in mm/s² (sent to driver).
         """
         distance = abs(pos_mm - (self._last_pos_mm or 0.0))
         est_s    = _travel_time_s(distance, spd_mms, accel_mms2)
 
-        self._last_cmd = f"move pos={pos_mm:.2f} mm  speed={spd_mms:.2f} mm/s"
-        self._send(_move_payloads(pos_mm, spd_mms))
+        self._last_cmd = (
+            f"move pos={pos_mm:.2f} mm  speed={spd_mms:.2f} mm/s  "
+            f"accel={accel_mms2:.2f} mm/s²  decel={decel_mms2:.2f} mm/s²"
+        )
+        self._send(_move_payloads(pos_mm, spd_mms, accel_mms2, decel_mms2))
         self._last_pos_mm = pos_mm
 
         # Show travel time estimate
         _info(
             f"Est. travel time: {est_s:.2f} s"
-            f"  (dist={distance:.1f} mm, accel={accel_mms2:.0f} mm/s²)"
+            f"  (dist={distance:.1f} mm, accel={accel_mms2:.2f} mm/s²)"
         )
 
         if wait_s is not None:
@@ -469,7 +545,8 @@ _HELP = """
   h                                    home (ZHOME)
   dwell <seconds>                      pause without moving
 
-  set accel <mm/s²>                    update acceleration for time estimates
+  set accel <mm/s²>                    set hardware acceleration ramp (sent to driver)
+  set decel <mm/s²>                    set hardware deceleration ramp (sent to driver)
   t <pos_mm> <speed_mms>               show travel time estimate (no move)
 
   s                                    status (port, heartbeat, last position)
@@ -478,10 +555,10 @@ _HELP = """
 """
 
 
-def _repl(driver: MotorDriver, accel_mms2: float) -> None:
+def _repl(driver: MotorDriver, accel_mms2: float, decel_mms2: float) -> None:
     print(_HELP)
-    _info(f"Acceleration assumption: {accel_mms2:.0f} mm/s²  "
-          f"(use 'set accel <val>' to update)")
+    _info(f"Accel: {accel_mms2:.2f} mm/s²   Decel: {decel_mms2:.2f} mm/s²  "
+          f"(use 'set accel/decel <val>' to update — sent to driver on each move)")
     print()
 
     while True:
@@ -552,7 +629,7 @@ def _repl(driver: MotorDriver, accel_mms2: float) -> None:
         # ── set parameter ──
         elif cmd == "set":
             if len(parts) < 3:
-                _warn("Usage:  set accel <mm/s²>")
+                _warn("Usage:  set accel <mm/s²>  |  set decel <mm/s²>")
                 continue
             key = parts[1].lower()
             if key == "accel":
@@ -564,10 +641,19 @@ def _repl(driver: MotorDriver, accel_mms2: float) -> None:
                 if accel_mms2 <= 0:
                     _warn("Acceleration must be > 0.")
                     continue
-                _ok(f"Acceleration assumption updated → {accel_mms2:.1f} mm/s²")
-                _warn("Note: this affects time estimates only — driver ramp is set in MEXE02.")
+                _ok(f"Acceleration updated → {accel_mms2:.2f} mm/s²  (applied on next move)")
+            elif key == "decel":
+                try:
+                    decel_mms2 = float(parts[2])
+                except ValueError:
+                    _warn("Deceleration must be a number (mm/s²).")
+                    continue
+                if decel_mms2 <= 0:
+                    _warn("Deceleration must be > 0.")
+                    continue
+                _ok(f"Deceleration updated → {decel_mms2:.2f} mm/s²  (applied on next move)")
             else:
-                _warn(f"Unknown setting '{key}'.  Available: accel")
+                _warn(f"Unknown setting '{key}'.  Available: accel, decel")
 
         # ── move ──
         elif cmd == "m":
@@ -609,7 +695,8 @@ def _repl(driver: MotorDriver, accel_mms2: float) -> None:
 
             _info(f"Move → {pos_mm:.2f} mm  @ {spd_mms:.2f} mm/s")
             try:
-                driver.move(pos_mm, spd_mms, wait_s=wait_s, accel_mms2=accel_mms2)
+                driver.move(pos_mm, spd_mms, wait_s=wait_s,
+                            accel_mms2=accel_mms2, decel_mms2=decel_mms2)
             except serial.SerialException as exc:
                 _err(f"Serial error: {exc}")
 
@@ -663,7 +750,8 @@ def _repl(driver: MotorDriver, accel_mms2: float) -> None:
                 f"@ {spd_mms:.1f} mm/s  for {time_s:.2f} s"
             )
             try:
-                driver.move(target_mm, spd_mms, wait_s=wait_s, accel_mms2=accel_mms2)
+                driver.move(target_mm, spd_mms, wait_s=wait_s,
+                            accel_mms2=accel_mms2, decel_mms2=decel_mms2)
             except serial.SerialException as exc:
                 _err(f"Serial error: {exc}")
 
@@ -695,8 +783,15 @@ def main() -> None:
         "--accel",
         type=float,
         default=DEFAULT_ACCEL_MMS2,
-        help=f"Acceleration assumption for time estimates in mm/s² "
-             f"(default: {DEFAULT_ACCEL_MMS2}).  Does NOT change driver setting.",
+        help=f"Initial hardware acceleration ramp in mm/s² "
+             f"(default: {DEFAULT_ACCEL_MMS2}).  Sent to driver on every move.",
+    )
+    parser.add_argument(
+        "--decel",
+        type=float,
+        default=DEFAULT_DECEL_MMS2,
+        help=f"Initial hardware deceleration ramp in mm/s² "
+             f"(default: {DEFAULT_DECEL_MMS2}).  Sent to driver on every move.",
     )
     args = parser.parse_args()
 
@@ -723,7 +818,7 @@ def main() -> None:
         sys.exit(1)
 
     try:
-        _repl(driver, accel_mms2=args.accel)
+        _repl(driver, accel_mms2=args.accel, decel_mms2=args.decel)
     finally:
         driver.close()
         print(_c("gray", "  Goodbye."))
