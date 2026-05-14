@@ -388,8 +388,8 @@ class MotorControllerNode(Node):
     ~/motor_cmd   [Float32MultiArray]
                     data[0]=position_mm
                     data[1]=speed_mms
-                    data[2]=acceleration_mms2   (optional, estimate only on USB)
-                    data[3]=deceleration_mms2   (optional, estimate only on USB)
+                    data[2]=acceleration_mms2   (optional; default 1.0 mm/s²)
+                    data[3]=deceleration_mms2   (optional; default 1.0 mm/s²)
                     data[4]=move_time_s         (optional, compute speed from time)
     ~/motor_home  [Empty]              trigger ZHOME homing sequence
 
@@ -407,7 +407,8 @@ class MotorControllerNode(Node):
         self.declare_parameter("serial_write_timeout", 0.5)
         self.declare_parameter("max_position_mm",      29.0)
         self.declare_parameter("max_speed_mms",        100.0)
-        self.declare_parameter("default_acceleration_mms2", 50.0)
+        self.declare_parameter("default_acceleration_mms2", 1.0)
+        self.declare_parameter("default_deceleration_mms2", 1.0)
         self.declare_parameter("frame_delay",          0.1)
         self.declare_parameter("heartbeat_interval",   0.2)
         self.declare_parameter("motor_id",             "motor")
@@ -419,6 +420,7 @@ class MotorControllerNode(Node):
         self._max_pos        = self.get_parameter("max_position_mm").value
         self._max_spd        = self.get_parameter("max_speed_mms").value
         self._default_accel  = self.get_parameter("default_acceleration_mms2").value
+        self._default_decel  = self.get_parameter("default_deceleration_mms2").value
         self._frame_delay    = self.get_parameter("frame_delay").value
         self._hb_interval    = self.get_parameter("heartbeat_interval").value
         self._motor_id       = self.get_parameter("motor_id").value
@@ -465,7 +467,10 @@ class MotorControllerNode(Node):
         pos_mm = float(msg.data[0])
         spd_mms = float(msg.data[1])
         accel_mms2 = float(msg.data[2]) if len(msg.data) >= 3 else self._default_accel
-        decel_mms2 = float(msg.data[3]) if len(msg.data) >= 4 else accel_mms2
+        decel_mms2 = (
+            float(msg.data[3]) if len(msg.data) >= 4
+            else (accel_mms2 if len(msg.data) >= 3 else self._default_decel)
+        )
         duration_s = float(msg.data[4]) if len(msg.data) >= 5 else 0.0
 
         if not (0.0 <= pos_mm <= self._max_pos):
