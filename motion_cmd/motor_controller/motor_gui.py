@@ -19,53 +19,60 @@ from std_msgs.msg import Float32MultiArray, Empty, String
 
 MOTORS = [
     {
-        "label": "Z Axis (M①)",
+        "label": "Step 1 Conveyor (M⑥)",
+        "ns":    "motor_conveyor",
+        "type":  "linear",
+        "default_position_mm": 80.0,
+        "default_speed_mms": 20.0,
+        "default_accel_mms2": 1.0,
+        "default_decel_mms2": 1.0,
+        "command_title": "Conveyor Feed  (Step 1: M⑥ FD)",
+        "send_text": "Send Step 1 Conveyor Feed",
+        "home_title": "Manual Conveyor Home",
+        "home_text": "Manual Home Conveyor",
+    },
+    {
+        "label": "Step 2/6 Z Axis (M①)",
         "ns":    "motor_z",
         "type":  "linear",
+        "default_position_mm": 25.0,
         "default_speed_mms": 15.0,
         "default_accel_mms2": 1.0,
         "default_decel_mms2": 1.0,
+        "command_title": "Yuzu Placement  (Step 2: M① Approach)",
+        "send_text": "Send Step 2 Approach",
+        "home_title": "Z Retract  (Step 6: M① HOME)",
+        "home_text": "Send Step 6 Z Home",
     },
     {
-        "label":               "Yuzu Rotation (M②)",
-        "ns":                  "motor_yuzu_rot",
-        "type":                "rotary",
-        "default_rpm":         225.0,
-        "rpm_hint":            "spec: 200-250 rpm  CCW",
-        "default_accel_rpm_s": 750.0,
-        "default_decel_rpm_s": 750.0,
-    },
-    {
-        "label": "Peeler Feed 3 (M③)",
-        "ns":    "motor_peeler_3",
-        "type":  "linear",
-        "default_speed_mms": 8.0,
-        "default_accel_mms2": 1.0,
-        "default_decel_mms2": 1.0,
-    },
-    {
-        "label": "Peeler Feed 4 (M④)",
-        "ns":    "motor_peeler_4",
-        "type":  "linear",
-        "default_speed_mms": 8.0,
-        "default_accel_mms2": 1.0,
-        "default_decel_mms2": 1.0,
-    },
-    {
-        "label":               "Peeler Orbit (M⑤)",
+        "label":               "Step 3/4 Peeler Orbit (M⑤)",
         "ns":                  "motor_peeler_orbit",
-        "type":                "rotary_servo",   # position (angle) + velocity (continuous spin)
+        "type":                "rotary_servo",   # position angle moves for Step 3 and Step 4
         "default_angle_deg":   90.0,
+        "default_return_angle_deg": -90.0,
         "default_rpm":         20.0,
-        "rpm_hint":            "spec: 20 rpm  CW",
+        "rpm_hint":            "spec: 20 rpm",
         "default_accel_rpm_s": 100.0,
         "default_decel_rpm_s": 100.0,
     },
     {
-        "label": "Conveyor (M⑥)",
-        "ns":    "motor_conveyor",
+        "label":               "Step 4 Yuzu Rotation (M②)",
+        "ns":                  "motor_yuzu_rot",
+        "type":                "rotary",
+        "default_rpm":         225.0,
+        "rpm_hint":            "Step 4: spec 200-250 rpm  CCW",
+        "default_accel_rpm_s": 750.0,
+        "default_decel_rpm_s": 750.0,
+        "command_title":       "Yuzu Rotation  (Step 4: M② CCW ROT)",
+        "spin_text":           "Send Step 4 Spin",
+        "stop_text":           "Stop M②  (Step 6 stop)",
+    },
+    {
+        "label": "Step 4/5/7 Peeler Feed (M③④)",
+        "ns":    "motor_peeler_3",
+        "paired_ns": "motor_peeler_4",
         "type":  "linear",
-        "default_speed_mms": 20.0,
+        "default_speed_mms": 8.0,
         "default_accel_mms2": 1.0,
         "default_decel_mms2": 1.0,
     },
@@ -124,11 +131,60 @@ PEEL_STEP_INFO = [
     ("① Yuzu positioning",   "M⑥ FD"),
     ("② Yuzu placement",     "M① Approach"),
     ("③ Peeler positioning", "M⑤ 90° ROT"),
-    ("④ Rotation + feed",    "M② CCW → M③④ FD → M⑤ CW"),
+    ("④ Rotation + feed",    "M② CCW → M③④ FD → M⑤ opposite 90° ROT"),
     ("⑤ Yuzu gripping",      "M③④ FD"),
     ("⑥ Z retract",          "M① HOME  +stop M②⑤"),
     ("⑦ Yuzu release",       "M③④ HOME"),
 ]
+
+SEQUENCE_PARAM_NAMES = [
+    "conveyor_settle_s", "conveyor_advance_mm", "conveyor_speed_mms",
+    "conveyor_accel_mms2", "conveyor_decel_mms2",
+    "z_lower_pos_mm", "z_lower_speed_mms", "z_accel_mms2", "z_decel_mms2", "z_lower_wait_s",
+    "peeler_position_angle_deg", "peeler_position_rpm",
+    "peeler_position_accel_rpm_s", "peeler_position_decel_rpm_s", "peeler_position_wait_s",
+    "yuzu_rotation_rpm", "yuzu_rotation_accel_rpm_s", "yuzu_rotation_decel_rpm_s",
+    "peeler_advance_mm", "peeler_advance_speed_mms",
+    "peeler_feed_accel_mms2", "peeler_feed_decel_mms2", "peeler_advance_wait_s",
+    "peeler_orbit_return_angle_deg",
+    "peeler_orbit_rpm", "peeler_orbit_accel_rpm_s", "peeler_orbit_decel_rpm_s",
+    "peel_duration_s",
+    "grip_advance_mm", "grip_speed_mms", "grip_wait_s",
+]
+
+DEFAULT_SEQUENCE_PARAMS = {
+    "conveyor_settle_s": 1.2,
+    "conveyor_advance_mm": 80.0,
+    "conveyor_speed_mms": 20.0,
+    "conveyor_accel_mms2": 1.0,
+    "conveyor_decel_mms2": 1.0,
+    "z_lower_pos_mm": 25.0,
+    "z_lower_speed_mms": 15.0,
+    "z_accel_mms2": 1.0,
+    "z_decel_mms2": 1.0,
+    "z_lower_wait_s": 2.0,
+    "peeler_position_angle_deg": 90.0,
+    "peeler_position_rpm": 20.0,
+    "peeler_position_accel_rpm_s": 100.0,
+    "peeler_position_decel_rpm_s": 100.0,
+    "peeler_position_wait_s": 1.0,
+    "yuzu_rotation_rpm": 225.0,
+    "yuzu_rotation_accel_rpm_s": 750.0,
+    "yuzu_rotation_decel_rpm_s": 750.0,
+    "peeler_advance_mm": 10.0,
+    "peeler_advance_speed_mms": 8.0,
+    "peeler_feed_accel_mms2": 1.0,
+    "peeler_feed_decel_mms2": 1.0,
+    "peeler_advance_wait_s": 1.0,
+    "peeler_orbit_return_angle_deg": -90.0,
+    "peeler_orbit_rpm": 20.0,
+    "peeler_orbit_accel_rpm_s": 100.0,
+    "peeler_orbit_decel_rpm_s": 100.0,
+    "peel_duration_s": 1.5,
+    "grip_advance_mm": 3.0,
+    "grip_speed_mms": 5.0,
+    "grip_wait_s": 0.5,
+}
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -150,7 +206,7 @@ class MotorGuiNode(Node):
             self._spin_pub = self.create_publisher(Float32MultiArray, "motor_spin", 10)
             self._stop_pub = self.create_publisher(Empty,             "motor_stop", 10)
         elif motor_type == "rotary_servo":
-            # Angle position AND continuous velocity — used by Motor⑤ (peeler orbit)
+            # Angle position moves — used by Motor⑤ (peeler orbit)
             self._angle_pub = self.create_publisher(Float32MultiArray, "motor_angle_cmd", 10)
             self._home_pub  = self.create_publisher(Empty,             "motor_home",      10)
             self._spin_pub  = self.create_publisher(Float32MultiArray, "motor_spin",      10)
@@ -202,16 +258,29 @@ class PeelGuiNode(Node):
         super().__init__("peel_gui")
         self._start_pub      = self.create_publisher(Empty, "/peel/start",        10)
         self._start_man_pub  = self.create_publisher(Empty, "/peel/start_manual", 10)
+        self._start_cfg_pub  = self.create_publisher(Float32MultiArray, "/peel/start_config", 10)
         self._next_step_pub  = self.create_publisher(Empty, "/peel/next_step",    10)
         self._abort_pub      = self.create_publisher(Empty, "/peel/abort",        10)
         self.create_subscription(String,            "/peel/status",   lambda m: status_callback(m.data),     10)
         self.create_subscription(Float32MultiArray, "/yuzu_detected", lambda m: yuzu_callback(list(m.data)), 10)
 
-    def start_auto(self):
-        self._start_pub.publish(Empty())
+    def start_auto(self, params: dict | None = None):
+        if params:
+            self._publish_start_config(False, params)
+        else:
+            self._start_pub.publish(Empty())
 
-    def start_manual(self):
-        self._start_man_pub.publish(Empty())
+    def start_manual(self, params: dict | None = None):
+        if params:
+            self._publish_start_config(True, params)
+        else:
+            self._start_man_pub.publish(Empty())
+
+    def _publish_start_config(self, manual: bool, params: dict):
+        msg = Float32MultiArray()
+        msg.data = [1.0 if manual else 0.0]
+        msg.data.extend(float(params[name]) for name in SEQUENCE_PARAM_NAMES)
+        self._start_cfg_pub.publish(msg)
 
     def next_step(self):
         self._next_step_pub.publish(Empty())
@@ -292,15 +361,20 @@ class MotorPanel:
         _log_print(self._log, "Panel ready.")
 
     def _build_linear(self, pad):
+        default_position = self._cfg.get("default_position_mm", 10.0)
         default_speed = self._cfg.get("default_speed_mms", 5.0)
         default_accel = self._cfg.get("default_accel_mms2", 1.0)
         default_decel = self._cfg.get("default_decel_mms2", 1.0)
+        command_title = self._cfg.get("command_title", "Motion Command")
+        send_text = self._cfg.get("send_text", "Send Command")
+        home_title = self._cfg.get("home_title", "Homing")
+        home_text = self._cfg.get("home_text", "Go Home")
 
-        f = ttk.LabelFrame(self._frame, text="Motion Command", padding=12)
+        f = ttk.LabelFrame(self._frame, text=command_title, padding=12)
         f.grid(row=1, column=0, columnspan=3, sticky="ew", **pad)
 
         tk.Label(f, text="Position (mm)").grid(row=0, column=0, sticky="w", pady=4)
-        self._pos_var = tk.StringVar(value="10.0")
+        self._pos_var = tk.StringVar(value=str(default_position))
         ttk.Entry(f, textvariable=self._pos_var, width=10).grid(row=0, column=1, sticky="w", padx=(8, 0))
         tk.Label(f, text=f"[0 - {MAX_POS}]", fg="gray").grid(row=0, column=2, sticky="w", padx=(6, 0))
 
@@ -324,20 +398,23 @@ class MotorPanel:
         ttk.Entry(f, textvariable=self._decel_var, width=10).grid(row=4, column=1, sticky="w", padx=(8, 0))
         tk.Label(f, text=f"[{MIN_ACCEL} - {MAX_ACCEL}]", fg="gray").grid(row=4, column=2, sticky="w", padx=(6, 0))
 
-        ttk.Button(f, text="Send Command", command=self._on_send).grid(
+        ttk.Button(f, text=send_text, command=self._on_send).grid(
             row=5, column=0, columnspan=3, pady=(10, 0), sticky="ew")
 
-        hf = ttk.LabelFrame(self._frame, text="Homing", padding=12)
+        hf = ttk.LabelFrame(self._frame, text=home_title, padding=12)
         hf.grid(row=2, column=0, columnspan=3, sticky="ew", **pad)
-        ttk.Button(hf, text="Go Home", command=self._on_home).pack(fill="x")
+        ttk.Button(hf, text=home_text, command=self._on_home).pack(fill="x")
 
     def _build_rotary(self, pad):
         default_rpm   = self._cfg.get("default_rpm", 200.0)
         rpm_hint      = self._cfg.get("rpm_hint", f"0 - {MAX_RPM}")
         default_accel = self._cfg.get("default_accel_rpm_s", 0.0)
         default_decel = self._cfg.get("default_decel_rpm_s", 0.0)
+        command_title = self._cfg.get("command_title", "Rotation Command")
+        spin_text = self._cfg.get("spin_text", "Spin")
+        stop_text = self._cfg.get("stop_text", "Stop")
 
-        f = ttk.LabelFrame(self._frame, text="Rotation Command", padding=12)
+        f = ttk.LabelFrame(self._frame, text=command_title, padding=12)
         f.grid(row=1, column=0, columnspan=3, sticky="ew", **pad)
 
         tk.Label(f, text="Speed (rpm)").grid(row=0, column=0, sticky="w", pady=4)
@@ -359,14 +436,15 @@ class MotorPanel:
 
         bf = tk.Frame(f)
         bf.grid(row=3, column=0, columnspan=3, pady=(10, 0), sticky="ew")
-        ttk.Button(bf, text="Spin", command=self._on_spin).pack(side="left", expand=True, fill="x", padx=(0, 4))
-        ttk.Button(bf, text="Stop", command=self._on_stop).pack(side="left", expand=True, fill="x")
+        ttk.Button(bf, text=spin_text, command=self._on_spin).pack(side="left", expand=True, fill="x", padx=(0, 4))
+        ttk.Button(bf, text=stop_text, command=self._on_stop).pack(side="left", expand=True, fill="x")
 
         tk.Frame(self._frame, height=1).grid(row=2)
 
     def _build_rotary_servo(self, pad):
-        """Panel for Motor⑤ — both absolute angle positioning AND continuous velocity."""
+        """Panel for Motor⑤ — angle positioning for Step 3 and the opposite Step 4 move."""
         default_angle = self._cfg.get("default_angle_deg",  90.0)
+        default_return_angle = self._cfg.get("default_return_angle_deg", -90.0)
         default_rpm   = self._cfg.get("default_rpm",         20.0)
         rpm_hint      = self._cfg.get("rpm_hint", f"0 - {MAX_RPM}")
         default_accel = self._cfg.get("default_accel_rpm_s",  0.0)
@@ -400,37 +478,42 @@ class MotorPanel:
 
         abf = tk.Frame(af)
         abf.grid(row=4, column=0, columnspan=3, pady=(10, 0), sticky="ew")
-        ttk.Button(abf, text="Send Angle", command=self._on_send_angle).pack(
+        ttk.Button(abf, text="Send Step 3 Angle", command=self._on_send_angle).pack(
             side="left", expand=True, fill="x", padx=(0, 4))
-        ttk.Button(abf, text="Home (0°)", command=self._on_home).pack(
+        ttk.Button(abf, text="Manual Home M⑤ (0°)", command=self._on_home).pack(
             side="left", expand=True, fill="x")
 
-        # ── Continuous rotation command (Step 4: CW orbit) ──
-        vf = ttk.LabelFrame(self._frame, text="Continuous Rotation  (Step 4: CW orbit)", padding=12)
+        # ── Opposite angle command (Step 4) ──
+        vf = ttk.LabelFrame(self._frame, text="Angle Position Command  (Step 4: opposite 90° ROT)", padding=12)
         vf.grid(row=2, column=0, columnspan=3, sticky="ew", **pad)
 
-        tk.Label(vf, text="Speed (rpm)").grid(row=0, column=0, sticky="w", pady=4)
-        self._rpm_var = tk.StringVar(value=str(default_rpm))
-        ttk.Entry(vf, textvariable=self._rpm_var, width=10).grid(row=0, column=1, sticky="w", padx=(8, 0))
-        tk.Label(vf, text=rpm_hint, fg="gray").grid(row=0, column=2, sticky="w", padx=(6, 0))
+        tk.Label(vf, text="Angle (deg)").grid(row=0, column=0, sticky="w", pady=4)
+        self._return_angle_deg_var = tk.StringVar(value=str(default_return_angle))
+        ttk.Entry(vf, textvariable=self._return_angle_deg_var, width=10).grid(row=0, column=1, sticky="w", padx=(8, 0))
+        tk.Label(vf, text="opposite direction from Step 3", fg="gray").grid(row=0, column=2, sticky="w", padx=(6, 0))
 
-        tk.Label(vf, text="Accel (rpm/s)").grid(row=1, column=0, sticky="w", pady=4)
-        self._accel_rpm_var = tk.StringVar(value=str(default_accel))
-        ttk.Entry(vf, textvariable=self._accel_rpm_var, width=10).grid(row=1, column=1, sticky="w", padx=(8, 0))
+        tk.Label(vf, text="Speed (rpm)").grid(row=1, column=0, sticky="w", pady=4)
+        self._return_speed_rpm_var = tk.StringVar(value=str(default_rpm))
+        ttk.Entry(vf, textvariable=self._return_speed_rpm_var, width=10).grid(row=1, column=1, sticky="w", padx=(8, 0))
+        tk.Label(vf, text=rpm_hint, fg="gray").grid(row=1, column=2, sticky="w", padx=(6, 0))
+
+        tk.Label(vf, text="Accel (rpm/s)").grid(row=2, column=0, sticky="w", pady=4)
+        self._return_accel_rpm_var = tk.StringVar(value=str(default_accel))
+        ttk.Entry(vf, textvariable=self._return_accel_rpm_var, width=10).grid(row=2, column=1, sticky="w", padx=(8, 0))
         tk.Label(vf, text=f"[{MIN_RPM_ACCEL:.0f} - {MAX_RPM_ACCEL:.0f}]  0 = instant",
-                 fg="gray").grid(row=1, column=2, sticky="w", padx=(6, 0))
-
-        tk.Label(vf, text="Decel (rpm/s)").grid(row=2, column=0, sticky="w", pady=4)
-        self._decel_rpm_var = tk.StringVar(value=str(default_decel))
-        ttk.Entry(vf, textvariable=self._decel_rpm_var, width=10).grid(row=2, column=1, sticky="w", padx=(8, 0))
-        tk.Label(vf, text="0 = same as accel",
                  fg="gray").grid(row=2, column=2, sticky="w", padx=(6, 0))
 
+        tk.Label(vf, text="Decel (rpm/s)").grid(row=3, column=0, sticky="w", pady=4)
+        self._return_decel_rpm_var = tk.StringVar(value=str(default_decel))
+        ttk.Entry(vf, textvariable=self._return_decel_rpm_var, width=10).grid(row=3, column=1, sticky="w", padx=(8, 0))
+        tk.Label(vf, text="0 = same as accel",
+                 fg="gray").grid(row=3, column=2, sticky="w", padx=(6, 0))
+
         vbf = tk.Frame(vf)
-        vbf.grid(row=3, column=0, columnspan=3, pady=(10, 0), sticky="ew")
-        ttk.Button(vbf, text="Spin", command=self._on_spin).pack(
+        vbf.grid(row=4, column=0, columnspan=3, pady=(10, 0), sticky="ew")
+        ttk.Button(vbf, text="Send Step 4 Opposite Angle", command=self._on_send_return_angle).pack(
             side="left", expand=True, fill="x", padx=(0, 4))
-        ttk.Button(vbf, text="Stop", command=self._on_stop).pack(
+        ttk.Button(vbf, text="Stop M⑤  (Step 6 stop)", command=self._on_stop).pack(
             side="left", expand=True, fill="x")
 
     # ── Handlers ──────────────────────────────────────────────────
@@ -506,6 +589,53 @@ class MotorPanel:
             return math.sqrt(distance_mm * accel_mms2)
         return (accel_mms2 * duration_s - math.sqrt(disc)) / 2.0
 
+    def get_sequence_params(self) -> dict:
+        if self._type == "linear":
+            pos = float(self._pos_var.get().strip())
+            spd = float(self._spd_var.get().strip())
+            accel = float(self._accel_var.get().strip())
+            decel = float(self._decel_var.get().strip())
+            wait_text = self._time_var.get().strip()
+            wait_s = float(wait_text) if wait_text else None
+            if self._cfg["ns"] == "motor_z":
+                params = {
+                    "z_lower_pos_mm": pos,
+                    "z_lower_speed_mms": spd,
+                    "z_accel_mms2": accel,
+                    "z_decel_mms2": decel,
+                }
+                if wait_s is not None:
+                    params["z_lower_wait_s"] = wait_s
+                return params
+            if self._cfg["ns"] == "motor_conveyor":
+                params = {
+                    "conveyor_advance_mm": pos,
+                    "conveyor_speed_mms": spd,
+                    "conveyor_accel_mms2": accel,
+                    "conveyor_decel_mms2": decel,
+                }
+                if wait_s is not None:
+                    params["conveyor_settle_s"] = wait_s
+                return params
+        elif self._type == "rotary":
+            return {
+                "yuzu_rotation_rpm": float(self._rpm_var.get().strip()),
+                "yuzu_rotation_accel_rpm_s": float(self._accel_rpm_var.get().strip()),
+                "yuzu_rotation_decel_rpm_s": float(self._decel_rpm_var.get().strip()),
+            }
+        elif self._type == "rotary_servo":
+            return {
+                "peeler_position_angle_deg": float(self._angle_deg_var.get().strip()),
+                "peeler_position_rpm": float(self._angle_speed_rpm_var.get().strip()),
+                "peeler_position_accel_rpm_s": float(self._angle_accel_rpm_var.get().strip()),
+                "peeler_position_decel_rpm_s": float(self._angle_decel_rpm_var.get().strip()),
+                "peeler_orbit_return_angle_deg": float(self._return_angle_deg_var.get().strip()),
+                "peeler_orbit_rpm": float(self._return_speed_rpm_var.get().strip()),
+                "peeler_orbit_accel_rpm_s": float(self._return_accel_rpm_var.get().strip()),
+                "peeler_orbit_decel_rpm_s": float(self._return_decel_rpm_var.get().strip()),
+            }
+        return {}
+
     def _on_home(self):
         if not messagebox.askyesno("Confirm Homing", "Send homing command?"):
             return
@@ -537,6 +667,31 @@ class MotorPanel:
         self._node.send_angle_cmd(angle, speed, accel, decel)
         _log_print(self._log,
                    f">> motor_angle_cmd  angle={angle:.1f}°  "
+                   f"speed={speed:.1f} rpm  accel={accel:.1f}  decel={decel:.1f}")
+
+    def _on_send_return_angle(self):
+        try:
+            angle = float(self._return_angle_deg_var.get().strip())
+            speed = float(self._return_speed_rpm_var.get().strip())
+            accel = float(self._return_accel_rpm_var.get().strip())
+            decel = float(self._return_decel_rpm_var.get().strip())
+        except ValueError:
+            messagebox.showerror("Invalid Input", "All angle command fields must be numbers.")
+            return
+        if not (0.0 <= speed <= MAX_RPM):
+            messagebox.showerror("Out of Range", f"Speed must be 0 - {MAX_RPM} rpm.")
+            return
+        if not (MIN_RPM_ACCEL <= accel <= MAX_RPM_ACCEL):
+            messagebox.showerror("Out of Range",
+                                 f"Accel must be {MIN_RPM_ACCEL:.0f} - {MAX_RPM_ACCEL:.0f} rpm/s.")
+            return
+        if not (MIN_RPM_ACCEL <= decel <= MAX_RPM_ACCEL):
+            messagebox.showerror("Out of Range",
+                                 f"Decel must be {MIN_RPM_ACCEL:.0f} - {MAX_RPM_ACCEL:.0f} rpm/s.")
+            return
+        self._node.send_angle_cmd(angle, speed, accel, decel)
+        _log_print(self._log,
+                   f">> motor_angle_cmd  step4_opposite_angle={angle:.1f}°  "
                    f"speed={speed:.1f} rpm  accel={accel:.1f}  decel={decel:.1f}")
 
     def _on_spin(self):
@@ -577,13 +732,219 @@ class MotorPanel:
         _log_print(self._log, f"<< status: {status}")
 
 
+class PairedLinearMotorPanel(MotorPanel):
+    """One command surface for Motor③ and Motor④ peeler feed axes."""
+
+    def __init__(self, parent: tk.Widget, node_a: MotorGuiNode, node_b: MotorGuiNode, cfg: dict):
+        self._node_b = node_b
+        self._status_b = "idle"
+        super().__init__(parent, node_a, cfg)
+
+    def _build_ui(self):
+        pad = {"padx": 12, "pady": 6}
+        self._build_pair_status()
+        self._build_step4_feed(pad)
+        self._build_step5_grip(pad)
+        hf = ttk.LabelFrame(self._frame, text="Release  (Step 7: M③④ HOME)", padding=12)
+        hf.grid(row=3, column=0, columnspan=3, sticky="ew", **pad)
+        ttk.Button(hf, text="Send Step 7 Release Home", command=self._on_home).pack(fill="x")
+        self._log = _log_widget(self._frame, row=4)
+        _log_print(self._log, "Paired panel ready. Step 4 and Step 5 values customize the peel sequence.")
+
+    def _build_step4_feed(self, pad):
+        default_speed = self._cfg.get("default_speed_mms", 8.0)
+        default_accel = self._cfg.get("default_accel_mms2", 1.0)
+        default_decel = self._cfg.get("default_decel_mms2", 1.0)
+
+        f = ttk.LabelFrame(self._frame, text="Peeling Feed  (Step 4: M③④ FD depth)", padding=12)
+        f.grid(row=1, column=0, columnspan=3, sticky="ew", **pad)
+
+        tk.Label(f, text="Position (mm)").grid(row=0, column=0, sticky="w", pady=4)
+        self._pos_var = tk.StringVar(value="10.0")
+        ttk.Entry(f, textvariable=self._pos_var, width=10).grid(row=0, column=1, sticky="w", padx=(8, 0))
+        tk.Label(f, text=f"[0 - {MAX_POS}]", fg="gray").grid(row=0, column=2, sticky="w", padx=(6, 0))
+
+        tk.Label(f, text="Speed (mm/s)").grid(row=1, column=0, sticky="w", pady=4)
+        self._spd_var = tk.StringVar(value=str(default_speed))
+        ttk.Entry(f, textvariable=self._spd_var, width=10).grid(row=1, column=1, sticky="w", padx=(8, 0))
+        tk.Label(f, text=f"[{MIN_SPEED} - {MAX_SPEED}]", fg="gray").grid(row=1, column=2, sticky="w", padx=(6, 0))
+
+        tk.Label(f, text="Wait (s)").grid(row=2, column=0, sticky="w", pady=4)
+        self._time_var = tk.StringVar(value="")
+        ttk.Entry(f, textvariable=self._time_var, width=10).grid(row=2, column=1, sticky="w", padx=(8, 0))
+        tk.Label(f, text="optional", fg="gray").grid(row=2, column=2, sticky="w", padx=(6, 0))
+
+        tk.Label(f, text="Accel (mm/s²)").grid(row=3, column=0, sticky="w", pady=4)
+        self._accel_var = tk.StringVar(value=str(default_accel))
+        ttk.Entry(f, textvariable=self._accel_var, width=10).grid(row=3, column=1, sticky="w", padx=(8, 0))
+        tk.Label(f, text=f"[{MIN_ACCEL} - {MAX_ACCEL}]", fg="gray").grid(row=3, column=2, sticky="w", padx=(6, 0))
+
+        tk.Label(f, text="Decel (mm/s²)").grid(row=4, column=0, sticky="w", pady=4)
+        self._decel_var = tk.StringVar(value=str(default_decel))
+        ttk.Entry(f, textvariable=self._decel_var, width=10).grid(row=4, column=1, sticky="w", padx=(8, 0))
+        tk.Label(f, text=f"[{MIN_ACCEL} - {MAX_ACCEL}]", fg="gray").grid(row=4, column=2, sticky="w", padx=(6, 0))
+
+        ttk.Button(f, text="Send Step 4 Feed", command=self._on_send).grid(
+            row=5, column=0, columnspan=3, pady=(10, 0), sticky="ew")
+
+    def _build_step5_grip(self, pad):
+        f = ttk.LabelFrame(self._frame, text="Yuzu Gripping  (Step 5: M③④ FD)", padding=12)
+        f.grid(row=2, column=0, columnspan=3, sticky="ew", **pad)
+
+        tk.Label(f, text="Extra advance (mm)").grid(row=0, column=0, sticky="w", pady=4)
+        self._grip_advance_var = tk.StringVar(value="3.0")
+        ttk.Entry(f, textvariable=self._grip_advance_var, width=10).grid(row=0, column=1, sticky="w", padx=(8, 0))
+        tk.Label(f, text=f"[0 - {MAX_POS}]", fg="gray").grid(row=0, column=2, sticky="w", padx=(6, 0))
+
+        tk.Label(f, text="Speed (mm/s)").grid(row=1, column=0, sticky="w", pady=4)
+        self._grip_speed_var = tk.StringVar(value="5.0")
+        ttk.Entry(f, textvariable=self._grip_speed_var, width=10).grid(row=1, column=1, sticky="w", padx=(8, 0))
+        tk.Label(f, text=f"[{MIN_SPEED} - {MAX_SPEED}]", fg="gray").grid(row=1, column=2, sticky="w", padx=(6, 0))
+
+        tk.Label(f, text="Wait (s)").grid(row=2, column=0, sticky="w", pady=4)
+        self._grip_wait_var = tk.StringVar(value="0.5")
+        ttk.Entry(f, textvariable=self._grip_wait_var, width=10).grid(row=2, column=1, sticky="w", padx=(8, 0))
+        tk.Label(f, text="sequence wait", fg="gray").grid(row=2, column=2, sticky="w", padx=(6, 0))
+
+        ttk.Button(f, text="Send Step 5 Grip", command=self._on_send_grip).grid(
+            row=3, column=0, columnspan=3, pady=(10, 0), sticky="ew")
+
+    def _build_pair_status(self):
+        frame = tk.Frame(self._frame, bg="#212121", pady=8)
+        frame.grid(row=0, column=0, columnspan=3, sticky="ew")
+
+        tk.Label(frame, text="M③:", bg="#212121", fg="white",
+                 font=("Helvetica", 10)).pack(side="left", padx=(12, 6))
+        self._dot = tk.Label(frame, text="●", bg="#212121",
+                             fg=STATUS_COLORS["idle"], font=("Helvetica", 14))
+        self._dot.pack(side="left")
+        self._lbl = tk.Label(frame, text="idle", bg="#212121", fg="white",
+                             font=("Helvetica", 10, "bold"), width=12, anchor="w")
+        self._lbl.pack(side="left", padx=(4, 16))
+
+        tk.Label(frame, text="M④:", bg="#212121", fg="white",
+                 font=("Helvetica", 10)).pack(side="left", padx=(0, 6))
+        self._dot_b = tk.Label(frame, text="●", bg="#212121",
+                               fg=STATUS_COLORS["idle"], font=("Helvetica", 14))
+        self._dot_b.pack(side="left")
+        self._lbl_b = tk.Label(frame, text="idle", bg="#212121", fg="white",
+                               font=("Helvetica", 10, "bold"), width=12, anchor="w")
+        self._lbl_b.pack(side="left", padx=(4, 0))
+
+    def _on_send(self):
+        try:
+            pos   = float(self._pos_var.get().strip())
+            spd   = float(self._spd_var.get().strip())
+            accel = float(self._accel_var.get().strip())
+            decel = float(self._decel_var.get().strip())
+        except ValueError:
+            messagebox.showerror("Invalid Input", "Position, speed, accel, and decel must be numbers.")
+            return
+
+        time_text = self._time_var.get().strip()
+        duration  = None
+        if time_text:
+            try:
+                duration = float(time_text)
+            except ValueError:
+                messagebox.showerror("Invalid Input", "Time must be a number.")
+                return
+
+        if not (0.0 <= pos <= MAX_POS):
+            messagebox.showerror("Out of Range", f"Position must be 0 - {MAX_POS} mm.")
+            return
+        if not (MIN_ACCEL <= accel <= MAX_ACCEL):
+            messagebox.showerror("Out of Range", f"Acceleration must be {MIN_ACCEL} - {MAX_ACCEL} mm/s².")
+            return
+        if not (MIN_ACCEL <= decel <= MAX_ACCEL):
+            messagebox.showerror("Out of Range", f"Deceleration must be {MIN_ACCEL} - {MAX_ACCEL} mm/s².")
+            return
+
+        if duration is not None:
+            if duration <= 0.0:
+                messagebox.showerror("Out of Range", "Time must be > 0 s.")
+                return
+            spd = self._speed_for_duration(abs(pos - self._last_pos_mm), duration, accel)
+            if spd is None:
+                return
+
+        if not (MIN_SPEED <= spd <= MAX_SPEED):
+            messagebox.showerror("Out of Range", f"Speed must be {MIN_SPEED} - {MAX_SPEED} mm/s.")
+            return
+
+        self._node.send_cmd(pos, spd, accel, decel, duration)
+        self._node_b.send_cmd(pos, spd, accel, decel, duration)
+        self._last_pos_mm = pos
+
+        log_line = (
+            f">> M③④ motor_cmd  pos={pos} mm  speed={spd:.3f} mm/s  "
+            f"accel={accel:g} mm/s²  decel={decel:g} mm/s²"
+        )
+        if duration is not None:
+            log_line += f"  time={duration:g} s"
+        _log_print(self._log, log_line)
+
+    def _on_home(self):
+        if not messagebox.askyesno("Confirm Homing", "Send homing command to M③ and M④?"):
+            return
+        self._node.send_home()
+        self._node_b.send_home()
+        self._last_pos_mm = 0.0
+        _log_print(self._log, ">> M③④ motor_home")
+
+    def _on_send_grip(self):
+        try:
+            base_pos = float(self._pos_var.get().strip())
+            extra = float(self._grip_advance_var.get().strip())
+            spd = float(self._grip_speed_var.get().strip())
+            accel = float(self._accel_var.get().strip())
+            decel = float(self._decel_var.get().strip())
+        except ValueError:
+            messagebox.showerror("Invalid Input", "Grip, speed, accel, and decel must be numbers.")
+            return
+        pos = min(MAX_POS, base_pos + extra)
+        self._node.send_cmd(pos, spd, accel, decel)
+        self._node_b.send_cmd(pos, spd, accel, decel)
+        self._last_pos_mm = pos
+        _log_print(self._log, f">> M③④ grip_cmd  pos={pos:.3f} mm  extra={extra:g} mm  speed={spd:g} mm/s")
+
+    def get_sequence_params(self) -> dict:
+        params = super().get_sequence_params()
+        if "peeler_advance_mm" not in params:
+            params = {
+                "peeler_advance_mm": float(self._pos_var.get().strip()),
+                "peeler_advance_speed_mms": float(self._spd_var.get().strip()),
+                "peeler_feed_accel_mms2": float(self._accel_var.get().strip()),
+                "peeler_feed_decel_mms2": float(self._decel_var.get().strip()),
+            }
+        wait_text = self._time_var.get().strip()
+        if wait_text:
+            params["peeler_advance_wait_s"] = float(wait_text)
+        params.update({
+            "grip_advance_mm": float(self._grip_advance_var.get().strip()),
+            "grip_speed_mms": float(self._grip_speed_var.get().strip()),
+            "grip_wait_s": float(self._grip_wait_var.get().strip()),
+        })
+        return params
+
+    def update_status_b(self, status: str, root: tk.Tk):
+        root.after(0, self._apply_status_b, status)
+
+    def _apply_status_b(self, status: str):
+        color = STATUS_COLORS.get(status, "white")
+        self._dot_b.config(fg=color)
+        self._lbl_b.config(text=status)
+        _log_print(self._log, f"<< M④ status: {status}")
+
+
 # ── Peel Sequence panel ───────────────────────────────────────────────────────
 
 class PeelPanel:
-    def __init__(self, parent: tk.Widget, node: PeelGuiNode):
-        self._node       = node
-        self._frame      = ttk.Frame(parent)
-        self._last_step  = ""   # last non-pause step state; used to derive "next"
+    def __init__(self, parent: tk.Widget, node: PeelGuiNode, sequence_param_source):
+        self._node                  = node
+        self._sequence_param_source = sequence_param_source
+        self._frame                 = ttk.Frame(parent)
+        self._last_step             = ""   # last non-pause step state; used to derive "next"
         self._build_ui()
 
     @property
@@ -672,13 +1033,32 @@ class PeelPanel:
     # ── Handlers ──────────────────────────────────────────────────
 
     def _on_start_auto(self):
-        self._node.start_auto()
-        _log_print(self._log, ">> /peel/start  [auto]")
+        params = self._sequence_params_or_none()
+        if params is None:
+            return
+        self._node.start_auto(params)
+        _log_print(self._log, ">> /peel/start_config  [auto + panel values]")
 
     def _on_start_manual(self):
-        self._node.start_manual()
+        params = self._sequence_params_or_none()
+        if params is None:
+            return
+        self._node.start_manual(params)
         self._last_step = ""
-        _log_print(self._log, ">> /peel/start_manual  [step-by-step]")
+        _log_print(self._log, ">> /peel/start_config  [manual + panel values]")
+
+    def _sequence_params_or_none(self) -> dict | None:
+        try:
+            params = self._sequence_param_source()
+        except ValueError as exc:
+            messagebox.showerror("Invalid Sequence Input", str(exc))
+            return None
+        missing = [name for name in SEQUENCE_PARAM_NAMES if name not in params]
+        if missing:
+            messagebox.showerror("Missing Sequence Input", f"Missing sequence parameters: {', '.join(missing)}")
+            return None
+        _log_print(self._log, "Applied panel values to peel sequence.")
+        return params
 
     def _on_next_step(self):
         self._node.next_step()
@@ -818,6 +1198,7 @@ def main():
     notebook.pack(fill="both", expand=True, padx=8, pady=8)
 
     # ── One tab per motor ──
+    motor_panels: list[MotorPanel] = []
     for cfg in MOTORS:
         panel_ref: list = [None]
 
@@ -826,6 +1207,35 @@ def main():
                 if ref[0]:
                     ref[0].update_status(status, r)
             return cb
+
+        if cfg.get("paired_ns"):
+            node = MotorGuiNode(
+                namespace=cfg["ns"],
+                motor_type=cfg["type"],
+                status_callback=make_status_cb(panel_ref, root),
+            )
+            executor.add_node(node)
+            nodes.append(node)
+
+            def make_paired_status_cb(ref, r):
+                def cb(status):
+                    if ref[0]:
+                        ref[0].update_status_b(status, r)
+                return cb
+
+            paired_node = MotorGuiNode(
+                namespace=cfg["paired_ns"],
+                motor_type=cfg["type"],
+                status_callback=make_paired_status_cb(panel_ref, root),
+            )
+            executor.add_node(paired_node)
+            nodes.append(paired_node)
+
+            panel = PairedLinearMotorPanel(notebook, node, paired_node, cfg)
+            panel_ref[0] = panel
+            notebook.add(panel.frame, text=cfg["label"])
+            motor_panels.append(panel)
+            continue
 
         node = MotorGuiNode(
             namespace=cfg["ns"],
@@ -838,6 +1248,7 @@ def main():
         panel = MotorPanel(notebook, node, cfg)
         panel_ref[0] = panel
         notebook.add(panel.frame, text=cfg["label"])
+        motor_panels.append(panel)
 
     # ── Peel sequence tab ──
     peel_ref: list = [None]
@@ -854,7 +1265,16 @@ def main():
     executor.add_node(peel_node)
     nodes.append(peel_node)
 
-    peel_panel = PeelPanel(notebook, peel_node)
+    def collect_sequence_params() -> dict:
+        params = dict(DEFAULT_SEQUENCE_PARAMS)
+        for panel in motor_panels:
+            try:
+                params.update(panel.get_sequence_params())
+            except ValueError as exc:
+                raise ValueError(f"{panel._cfg['label']}: invalid numeric input ({exc})") from exc
+        return params
+
+    peel_panel = PeelPanel(notebook, peel_node, collect_sequence_params)
     peel_ref[0] = peel_panel
     notebook.add(peel_panel.frame, text="Peel Sequence")
 

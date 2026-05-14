@@ -6,7 +6,7 @@ Machine spec (YuzuSequence.pdf):
   Motor②  Rotational motion      — 200-250 rpm, CCW during peeling
   Motor③  Feed motion (top)      — peeling depth, linear
   Motor④  Feed motion (bottom)   — peeling depth, linear
-  Motor⑤  Rotational motion      — 20 rpm; positions 90° then CW orbit
+  Motor⑤  Rotational motion      — 20 rpm; positions 90° then opposite 90°
   Motor⑥  Conveyor feed          — Type 1 linear (cumulative position per tray)
 
 Sequence (YuzuSequence.pdf page 2):
@@ -15,7 +15,7 @@ Sequence (YuzuSequence.pdf page 2):
   Step 3  Peeler positioning Motor⑤  90° ROT
   Step 4  Rotation + feed    Motor② ① CCW ROT
                              Motor③&④ ② FD  (simultaneous)
-                             Motor⑤  ③ CW ROT
+                             Motor⑤  ③ opposite 90° ROT
   Step 5  Yuzu gripping      Motor③&④ FD  (additional grip)
   Step 6  Feed motion        Motor①  HOME  (+ stop ② and ⑤)
   Step 7  Yuzu release       Motor③&④ HOME
@@ -53,7 +53,10 @@ Motor interface types:
                   Motors: ① motor_z, ③ motor_peeler_3, ④ motor_peeler_4, ⑥ motor_conveyor
   Type 2 (rotary) — motor_spin [Float32MultiArray: rpm, accel_rpm_s, decel_rpm_s]
                   — motor_stop [Empty]
-                  Motors: ② motor_yuzu_rot, ⑤ motor_peeler_orbit
+                  Motor: ② motor_yuzu_rot
+  Rotary position — motor_angle_cmd [Float32MultiArray: angle_deg, speed_rpm, accel_rpm_s, decel_rpm_s]
+                  — motor_home [Empty]
+                  Motor: ⑤ motor_peeler_orbit
 
 All timing and motion values are ROS2 parameters — tune without recompiling:
   ros2 param set /peel_sequence peel_duration_s 1.2
@@ -67,6 +70,21 @@ from std_msgs.msg import Float32MultiArray, Empty, String
 
 YUZU_LONG_NOM_MM  = 50.0
 YUZU_SHORT_NOM_MM = 44.0
+
+SEQUENCE_PARAM_NAMES = [
+    "conveyor_settle_s", "conveyor_advance_mm", "conveyor_speed_mms",
+    "conveyor_accel_mms2", "conveyor_decel_mms2",
+    "z_lower_pos_mm", "z_lower_speed_mms", "z_accel_mms2", "z_decel_mms2", "z_lower_wait_s",
+    "peeler_position_angle_deg", "peeler_position_rpm",
+    "peeler_position_accel_rpm_s", "peeler_position_decel_rpm_s", "peeler_position_wait_s",
+    "yuzu_rotation_rpm", "yuzu_rotation_accel_rpm_s", "yuzu_rotation_decel_rpm_s",
+    "peeler_advance_mm", "peeler_advance_speed_mms",
+    "peeler_feed_accel_mms2", "peeler_feed_decel_mms2", "peeler_advance_wait_s",
+    "peeler_orbit_return_angle_deg",
+    "peeler_orbit_rpm", "peeler_orbit_accel_rpm_s", "peeler_orbit_decel_rpm_s",
+    "peel_duration_s",
+    "grip_advance_mm", "grip_speed_mms", "grip_wait_s",
+]
 
 
 class PeelSequenceNode(Node):
@@ -89,6 +107,9 @@ class PeelSequenceNode(Node):
         self.declare_parameter("z_lower_wait_s",              2.0)
         # Peeler positioning (Motor⑤): angle position command to reach 90°
         self.declare_parameter("peeler_position_angle_deg",  90.0)   # target angle for Step 3
+        self.declare_parameter("peeler_position_rpm",        20.0)
+        self.declare_parameter("peeler_position_accel_rpm_s", 100.0)
+        self.declare_parameter("peeler_position_decel_rpm_s", 100.0)
         self.declare_parameter("peeler_position_wait_s",      1.0)   # time to complete 90° move + settle
         # Step 4 — rotation + feed
         self.declare_parameter("yuzu_rotation_rpm",         225.0)   # Motor② 200-250 rpm
@@ -100,7 +121,8 @@ class PeelSequenceNode(Node):
         self.declare_parameter("peeler_feed_accel_mms2",      1.0)
         self.declare_parameter("peeler_feed_decel_mms2",      1.0)
         self.declare_parameter("peeler_advance_wait_s",       1.0)
-        self.declare_parameter("peeler_orbit_rpm",           20.0)   # Motor⑤ 20 rpm
+        self.declare_parameter("peeler_orbit_return_angle_deg", -90.0)  # Step 4 opposite 90° move
+        self.declare_parameter("peeler_orbit_rpm",           20.0)   # Motor⑤ 20 rpm angle moves
         self.declare_parameter("peeler_orbit_accel_rpm_s",  100.0)
         self.declare_parameter("peeler_orbit_decel_rpm_s",  100.0)
         self.declare_parameter("peel_duration_s",             1.5)
@@ -127,14 +149,12 @@ class PeelSequenceNode(Node):
             # Motor④: Peeler feed bottom — Type 1
             "peeler4_cmd":   self.create_publisher(Float32MultiArray, "/motor_peeler_4/motor_cmd",  10),
             "peeler4_home":  self.create_publisher(Empty,             "/motor_peeler_4/motor_home", 10),
-            # Motor⑤: Peeler orbit — hybrid: angle position (Step 3) + velocity (Step 4)
+            # Motor⑤: Peeler orbit — angle position for Step 3 and Step 4
             #   motor_angle_cmd [Float32MultiArray: angle_deg, speed_rpm, accel_rpm_s?, decel_rpm_s?]
             #   motor_home      [Empty]  → return to 0°
-            #   motor_spin      [Float32MultiArray: rpm, accel_rpm_s, decel_rpm_s]
             #   motor_stop      [Empty]
             "orbit_angle_cmd": self.create_publisher(Float32MultiArray, "/motor_peeler_orbit/motor_angle_cmd", 10),
             "orbit_home":      self.create_publisher(Empty,             "/motor_peeler_orbit/motor_home",      10),
-            "orbit_spin":      self.create_publisher(Float32MultiArray, "/motor_peeler_orbit/motor_spin",      10),
             "orbit_stop":      self.create_publisher(Empty,             "/motor_peeler_orbit/motor_stop",      10),
             # Motor⑥: Conveyor — Type 1; cumulative position tracks tray count
             "conveyor_cmd":  self.create_publisher(Float32MultiArray, "/motor_conveyor/motor_cmd",  10),
@@ -145,6 +165,7 @@ class PeelSequenceNode(Node):
         self._status_pub = self.create_publisher(String, "/peel/status", 10)
         self.create_subscription(Empty,             "/peel/start",        self._on_start,         10)
         self.create_subscription(Empty,             "/peel/start_manual", self._on_start_manual,  10)
+        self.create_subscription(Float32MultiArray, "/peel/start_config", self._on_start_config,  10)
         self.create_subscription(Empty,             "/peel/next_step",    self._on_next_step,     10)
         self.create_subscription(Empty,             "/peel/abort",        self._on_abort,         10)
         self.create_subscription(Float32MultiArray, "/yuzu_detected",     self._on_yuzu_detected, 10)
@@ -155,6 +176,7 @@ class PeelSequenceNode(Node):
         self._manual_mode     = False
         self._seq_thread      = None
         self._yuzu_info       = None
+        self._config_override = {}
         self._conveyor_pos_mm = 0.0   # cumulative conveyor position (n_trays × pitch)
 
         self._publish_status("idle")
@@ -201,6 +223,29 @@ class PeelSequenceNode(Node):
             return
         self.get_logger().info("Starting peel sequence  [MANUAL step-by-step mode].")
         self._manual_mode = True
+        self._abort_event.clear()
+        self._step_event.clear()
+        self._seq_thread = threading.Thread(target=self._run_sequence, daemon=True)
+        self._seq_thread.start()
+
+    def _on_start_config(self, msg: Float32MultiArray):
+        expected = 1 + len(SEQUENCE_PARAM_NAMES)
+        if len(msg.data) != expected:
+            self.get_logger().warn(
+                f"/peel/start_config needs {expected} values: [manual_flag, {len(SEQUENCE_PARAM_NAMES)} params]"
+            )
+            return
+        if self._state not in ("idle", "done", "error", "aborted"):
+            self.get_logger().warn(f"Busy (state={self._state}) — ignoring /peel/start_config.")
+            return
+
+        self._manual_mode = bool(round(float(msg.data[0])))
+        self._config_override = {
+            name: float(value)
+            for name, value in zip(SEQUENCE_PARAM_NAMES, msg.data[1:])
+        }
+        mode = "MANUAL" if self._manual_mode else "AUTO"
+        self.get_logger().info(f"Starting peel sequence [{mode} mode] with GUI panel configuration.")
         self._abort_event.clear()
         self._step_event.clear()
         self._seq_thread = threading.Thread(target=self._run_sequence, daemon=True)
@@ -264,8 +309,8 @@ class PeelSequenceNode(Node):
             # Use absolute angle command (ABZO encoder) — reliable vs. timed velocity
             self._set_state("peeler_positioning")
             self._send_angle("orbit_angle_cmd", p["peeler_position_angle_deg"],
-                             p["peeler_orbit_rpm"],
-                             p["peeler_orbit_accel_rpm_s"], p["peeler_orbit_decel_rpm_s"])
+                             p["peeler_position_rpm"],
+                             p["peeler_position_accel_rpm_s"], p["peeler_position_decel_rpm_s"])
             if not self._wait_step(p["peeler_position_wait_s"]): return
 
             # ── Step 4: Rotation + feed — ①②③ sub-steps ──────────────
@@ -290,9 +335,10 @@ class PeelSequenceNode(Node):
                 p["peeler_feed_decel_mms2"],
             )
             if not self._wait(p["peeler_advance_wait_s"]): return   # intra-step timing
-            # ③ Motor⑤ CW ROT — orbit for peel_duration_s
-            self._send_rpm("orbit_spin", p["peeler_orbit_rpm"],
-                           p["peeler_orbit_accel_rpm_s"], p["peeler_orbit_decel_rpm_s"])
+            # ③ Motor⑤ CW ROT — matching angle move in the opposite direction
+            self._send_angle("orbit_angle_cmd", p["peeler_orbit_return_angle_deg"],
+                             p["peeler_orbit_rpm"],
+                             p["peeler_orbit_accel_rpm_s"], p["peeler_orbit_decel_rpm_s"])
             if not self._wait_step(p["peel_duration_s"]): return
 
             # ── Step 5: Yuzu gripping — Motor③&④ FD ──────────────────
@@ -341,17 +387,21 @@ class PeelSequenceNode(Node):
             "conveyor_settle_s", "conveyor_advance_mm", "conveyor_speed_mms",
             "conveyor_accel_mms2", "conveyor_decel_mms2",
             "z_lower_pos_mm", "z_lower_speed_mms", "z_accel_mms2", "z_decel_mms2", "z_lower_wait_s",
-            "peeler_position_angle_deg", "peeler_position_wait_s",
+            "peeler_position_angle_deg", "peeler_position_rpm",
+            "peeler_position_accel_rpm_s", "peeler_position_decel_rpm_s", "peeler_position_wait_s",
             "yuzu_rotation_rpm", "yuzu_rotation_accel_rpm_s", "yuzu_rotation_decel_rpm_s",
             "spin_up_wait_s",
             "peeler_advance_mm", "peeler_advance_speed_mms",
             "peeler_feed_accel_mms2", "peeler_feed_decel_mms2", "peeler_advance_wait_s",
+            "peeler_orbit_return_angle_deg",
             "peeler_orbit_rpm", "peeler_orbit_accel_rpm_s", "peeler_orbit_decel_rpm_s",
             "peel_duration_s",
             "grip_advance_mm", "grip_speed_mms", "grip_wait_s",
             "z_home_wait_s", "release_wait_s",
         ]
-        return {n: self.get_parameter(n).value for n in names}
+        params = {n: self.get_parameter(n).value for n in names}
+        params.update(self._config_override)
+        return params
 
     def _send_linear(self, key: str, pos_mm: float, speed_mms: float,
                      accel_mms2: float = 1.0, decel_mms2: float = 1.0):
