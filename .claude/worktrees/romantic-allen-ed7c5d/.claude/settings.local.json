@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ls \"C:\\\\Users\\\\thana\\\\01_Fang\\\\Advance Practice\\\\Yuzu_code-Image-processing-motor-\\\\.claude\\\\commands\" 2>/dev/null || echo \"no commands dir\")",
+      "Bash(mkdir \"C:\\\\Users\\\\thana\\\\01_Fang\\\\Advance Practice\\\\Yuzu_code-Image-processing-motor-\\\\.claude\\\\commands\")",
+      "Bash(python diff_dump.py dump_wrtiedata2.txt)",
+      "Bash(python -X utf8 diff_dump.py dump_wrtiedata2.txt)",
+      "Bash(python -X utf8 -c ' *)",
+      "Bash(findstr /C:\"decel reg\" /C:\"0.3 mm\" /C:\"0.9 mm\" /C:\"Block #07\" /C:\"Block #08\" /C:\"Block #09\" /C:\"Block #10\" /C:\"Block #11\" /C:\"Block #12\")",
+      "Bash(python -X utf8 -c \"import ast, sys; ast.parse\\(open\\('motor_direct.py'\\).read\\(\\)\\); print\\('syntax OK'\\)\")",
+      "Bash(gh --version)"
+    ]
+  }
+}

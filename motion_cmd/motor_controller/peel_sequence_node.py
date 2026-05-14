@@ -79,24 +79,30 @@ class PeelSequenceNode(Node):
         self.declare_parameter("conveyor_settle_s",           1.2)
         self.declare_parameter("conveyor_advance_mm",        80.0)   # one tray pitch
         self.declare_parameter("conveyor_speed_mms",         20.0)
+        self.declare_parameter("conveyor_accel_mms2",         1.0)
+        self.declare_parameter("conveyor_decel_mms2",         1.0)
         # Z-axis (Motor①) — approach / home
         self.declare_parameter("z_lower_pos_mm",             25.0)
         self.declare_parameter("z_lower_speed_mms",          15.0)
+        self.declare_parameter("z_accel_mms2",                1.0)
+        self.declare_parameter("z_decel_mms2",                1.0)
         self.declare_parameter("z_lower_wait_s",              2.0)
         # Peeler positioning (Motor⑤): angle position command to reach 90°
         self.declare_parameter("peeler_position_angle_deg",  90.0)   # target angle for Step 3
         self.declare_parameter("peeler_position_wait_s",      1.0)   # time to complete 90° move + settle
         # Step 4 — rotation + feed
         self.declare_parameter("yuzu_rotation_rpm",         225.0)   # Motor② 200-250 rpm
-        self.declare_parameter("yuzu_rotation_accel_rpm_s",  50.0)   # ramp up
-        self.declare_parameter("yuzu_rotation_decel_rpm_s",   0.0)   # 0 = same as accel
+        self.declare_parameter("yuzu_rotation_accel_rpm_s", 750.0)
+        self.declare_parameter("yuzu_rotation_decel_rpm_s", 750.0)
         self.declare_parameter("spin_up_wait_s",              0.3)
         self.declare_parameter("peeler_advance_mm",          10.0)   # Motor③&④ FD depth
         self.declare_parameter("peeler_advance_speed_mms",    8.0)
+        self.declare_parameter("peeler_feed_accel_mms2",      1.0)
+        self.declare_parameter("peeler_feed_decel_mms2",      1.0)
         self.declare_parameter("peeler_advance_wait_s",       1.0)
         self.declare_parameter("peeler_orbit_rpm",           20.0)   # Motor⑤ 20 rpm
-        self.declare_parameter("peeler_orbit_accel_rpm_s",   20.0)
-        self.declare_parameter("peeler_orbit_decel_rpm_s",    0.0)   # 0 = same as accel
+        self.declare_parameter("peeler_orbit_accel_rpm_s",  100.0)
+        self.declare_parameter("peeler_orbit_decel_rpm_s",  100.0)
         self.declare_parameter("peel_duration_s",             1.5)
         # Step 5 — yuzu gripping (extra FD on top of advance)
         self.declare_parameter("grip_advance_mm",             3.0)
@@ -234,12 +240,24 @@ class PeelSequenceNode(Node):
             # ── Step 1: Yuzu positioning — Motor⑥ FD ──────────────────
             self._set_state("yuzu_positioning")
             self._conveyor_pos_mm += p["conveyor_advance_mm"]
-            self._send_linear("conveyor_cmd", self._conveyor_pos_mm, p["conveyor_speed_mms"])
+            self._send_linear(
+                "conveyor_cmd",
+                self._conveyor_pos_mm,
+                p["conveyor_speed_mms"],
+                p["conveyor_accel_mms2"],
+                p["conveyor_decel_mms2"],
+            )
             if not self._wait_step(p["conveyor_settle_s"]): return
 
             # ── Step 2: Yuzu placement — Motor① Approach ──────────────
             self._set_state("yuzu_placement")
-            self._send_linear("z_cmd", z_lower, p["z_lower_speed_mms"])
+            self._send_linear(
+                "z_cmd",
+                z_lower,
+                p["z_lower_speed_mms"],
+                p["z_accel_mms2"],
+                p["z_decel_mms2"],
+            )
             if not self._wait_step(p["z_lower_wait_s"]): return
 
             # ── Step 3: Peeler positioning — Motor⑤ 90° ROT ───────────
@@ -257,8 +275,20 @@ class PeelSequenceNode(Node):
                            p["yuzu_rotation_accel_rpm_s"], p["yuzu_rotation_decel_rpm_s"])
             if not self._wait(p["spin_up_wait_s"]): return          # intra-step timing
             # ② Motor③&④ FD simultaneously
-            self._send_linear("peeler3_cmd", blade_advance, p["peeler_advance_speed_mms"])
-            self._send_linear("peeler4_cmd", blade_advance, p["peeler_advance_speed_mms"])
+            self._send_linear(
+                "peeler3_cmd",
+                blade_advance,
+                p["peeler_advance_speed_mms"],
+                p["peeler_feed_accel_mms2"],
+                p["peeler_feed_decel_mms2"],
+            )
+            self._send_linear(
+                "peeler4_cmd",
+                blade_advance,
+                p["peeler_advance_speed_mms"],
+                p["peeler_feed_accel_mms2"],
+                p["peeler_feed_decel_mms2"],
+            )
             if not self._wait(p["peeler_advance_wait_s"]): return   # intra-step timing
             # ③ Motor⑤ CW ROT — orbit for peel_duration_s
             self._send_rpm("orbit_spin", p["peeler_orbit_rpm"],
@@ -268,8 +298,20 @@ class PeelSequenceNode(Node):
             # ── Step 5: Yuzu gripping — Motor③&④ FD ──────────────────
             self._set_state("yuzu_gripping")
             grip_pos = min(29.0, blade_advance + p["grip_advance_mm"])
-            self._send_linear("peeler3_cmd", grip_pos, p["grip_speed_mms"])
-            self._send_linear("peeler4_cmd", grip_pos, p["grip_speed_mms"])
+            self._send_linear(
+                "peeler3_cmd",
+                grip_pos,
+                p["grip_speed_mms"],
+                p["peeler_feed_accel_mms2"],
+                p["peeler_feed_decel_mms2"],
+            )
+            self._send_linear(
+                "peeler4_cmd",
+                grip_pos,
+                p["grip_speed_mms"],
+                p["peeler_feed_accel_mms2"],
+                p["peeler_feed_decel_mms2"],
+            )
             if not self._wait_step(p["grip_wait_s"]): return
 
             # ── Step 6: Z retract — Motor① HOME + stop ②⑤ ────────────
@@ -297,11 +339,13 @@ class PeelSequenceNode(Node):
     def _load_params(self) -> dict:
         names = [
             "conveyor_settle_s", "conveyor_advance_mm", "conveyor_speed_mms",
-            "z_lower_pos_mm", "z_lower_speed_mms", "z_lower_wait_s",
+            "conveyor_accel_mms2", "conveyor_decel_mms2",
+            "z_lower_pos_mm", "z_lower_speed_mms", "z_accel_mms2", "z_decel_mms2", "z_lower_wait_s",
             "peeler_position_angle_deg", "peeler_position_wait_s",
             "yuzu_rotation_rpm", "yuzu_rotation_accel_rpm_s", "yuzu_rotation_decel_rpm_s",
             "spin_up_wait_s",
-            "peeler_advance_mm", "peeler_advance_speed_mms", "peeler_advance_wait_s",
+            "peeler_advance_mm", "peeler_advance_speed_mms",
+            "peeler_feed_accel_mms2", "peeler_feed_decel_mms2", "peeler_advance_wait_s",
             "peeler_orbit_rpm", "peeler_orbit_accel_rpm_s", "peeler_orbit_decel_rpm_s",
             "peel_duration_s",
             "grip_advance_mm", "grip_speed_mms", "grip_wait_s",
@@ -309,9 +353,15 @@ class PeelSequenceNode(Node):
         ]
         return {n: self.get_parameter(n).value for n in names}
 
-    def _send_linear(self, key: str, pos_mm: float, speed_mms: float):
+    def _send_linear(self, key: str, pos_mm: float, speed_mms: float,
+                     accel_mms2: float = 1.0, decel_mms2: float = 1.0):
         msg = Float32MultiArray()
-        msg.data = [float(pos_mm), float(speed_mms)]
+        msg.data = [
+            float(pos_mm),
+            float(speed_mms),
+            float(accel_mms2),
+            float(decel_mms2),
+        ]
         self._pub[key].publish(msg)
 
     def _send_rpm(self, key: str, rpm: float,

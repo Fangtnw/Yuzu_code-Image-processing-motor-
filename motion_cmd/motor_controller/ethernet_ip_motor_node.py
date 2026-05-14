@@ -70,7 +70,7 @@ Input assembly byte layout (T→O, 56 bytes, little-endian):
 
 ─────────────────────────────────────────────────────────────────────────────
 ROS2 topic API (drop-in replacement for motor_controller_node.py):
-    Subscribe  ~/motor_cmd    std_msgs/Float32MultiArray  [pos_mm, spd_mms]
+    Subscribe  ~/motor_cmd    std_msgs/Float32MultiArray  [pos_mm, spd_mms, accel?, decel?]
     Subscribe  ~/motor_home   std_msgs/Empty
     Publish    ~/motor_status std_msgs/String   idle|busy|running|error
 
@@ -82,8 +82,8 @@ ROS2 parameters:
     max_position_mm     float  29.0    Soft upper limit (mm)
     min_speed_mms       float  0.1     Minimum commanded speed (mm/s)
     max_speed_mms       float  100.0   Maximum commanded speed (mm/s)
-    acceleration_mms2   float  0.0     Move accel (mm/s²). 0 = driver default
-    deceleration_mms2   float  0.0     Move decel (mm/s²). 0 = driver default
+    acceleration_mms2   float  1.0     Move accel (mm/s²)
+    deceleration_mms2   float  1.0     Move decel (mm/s²)
     poll_interval_s     float  0.05    Status polling period (s)
     dcmd_rdy_timeout_s  float  3.0     Timeout waiting for DCMD-RDY before move
 """
@@ -260,8 +260,8 @@ class EthernetIPMotorNode(Node):
         self.declare_parameter("max_position_mm",      29.0)
         self.declare_parameter("min_speed_mms",         0.1)
         self.declare_parameter("max_speed_mms",       100.0)
-        self.declare_parameter("acceleration_mms2",     0.0)
-        self.declare_parameter("deceleration_mms2",     0.0)
+        self.declare_parameter("acceleration_mms2",     1.0)
+        self.declare_parameter("deceleration_mms2",     1.0)
         self.declare_parameter("poll_interval_s",       0.05)
         self.declare_parameter("dcmd_rdy_timeout_s",    3.0)
 
@@ -420,7 +420,8 @@ class EthernetIPMotorNode(Node):
         )
         return False
 
-    def _move(self, pos_mm: float, spd_mms: float) -> bool:
+    def _move(self, pos_mm: float, spd_mms: float,
+              accel_raw: int | None = None, decel_raw: int | None = None) -> bool:
         """
         Absolute positioning via direct data operation (TRIG ON-edge mode).
         Sequence per manual §6-3:
@@ -431,6 +432,8 @@ class EthernetIPMotorNode(Node):
         """
         pos_steps = int(round(pos_mm  * self._spm))
         speed_hz  = max(1, int(round(spd_mms * self._spm)))
+        accel_raw = self._acc_raw if accel_raw is None else accel_raw
+        decel_raw = self._dec_raw if decel_raw is None else decel_raw
 
         self._last_pos_steps = pos_steps
         self._last_speed_hz  = speed_hz
@@ -444,8 +447,8 @@ class EthernetIPMotorNode(Node):
             dcmd_type=DCMD_ABS,
             pos_steps=pos_steps,
             speed_hz=speed_hz,
-            accel_raw=self._acc_raw,
-            decel_raw=self._dec_raw,
+            accel_raw=accel_raw,
+            decel_raw=decel_raw,
         )
         if not self._write_output(cmd_data):
             return False
@@ -459,8 +462,8 @@ class EthernetIPMotorNode(Node):
             dcmd_type=DCMD_ABS,
             pos_steps=pos_steps,
             speed_hz=speed_hz,
-            accel_raw=self._acc_raw,
-            decel_raw=self._dec_raw,
+            accel_raw=accel_raw,
+            decel_raw=decel_raw,
         )
         if not self._write_output(cmd_trig):
             return False
@@ -473,8 +476,8 @@ class EthernetIPMotorNode(Node):
             dcmd_type=DCMD_ABS,
             pos_steps=pos_steps,
             speed_hz=speed_hz,
-            accel_raw=self._acc_raw,
-            decel_raw=self._dec_raw,
+            accel_raw=accel_raw,
+            decel_raw=decel_raw,
         )
         return self._write_output(cmd_clear)
 
@@ -509,6 +512,8 @@ class EthernetIPMotorNode(Node):
 
         pos_mm  = float(msg.data[0])
         spd_mms = float(msg.data[1])
+        accel_mms2 = float(msg.data[2]) if len(msg.data) >= 3 else 0.0
+        decel_mms2 = float(msg.data[3]) if len(msg.data) >= 4 else accel_mms2
 
         if not (0.0 <= pos_mm <= self._max_pos):
             self.get_logger().error(
@@ -522,6 +527,16 @@ class EthernetIPMotorNode(Node):
                 f"[{self._min_spd}, {self._max_spd}] — ignoring."
             )
             return
+        if accel_mms2 < 0.0 or decel_mms2 < 0.0:
+            self.get_logger().error(
+                f"[{self._motor_id}] Accel/decel must be >= 0 mm/s² — ignoring."
+            )
+            return
+
+        accel_eff = accel_mms2 if accel_mms2 > 0.0 else self._acc_raw / self._spm
+        decel_eff = decel_mms2 if decel_mms2 > 0.0 else self._dec_raw / self._spm
+        accel_raw = int(round(accel_eff * self._spm))
+        decel_raw = int(round(decel_eff * self._spm))
 
         if not self._ensure_connected():
             self._publish_status("error")
@@ -529,11 +544,12 @@ class EthernetIPMotorNode(Node):
 
         self.get_logger().info(
             f"[{self._motor_id}] Move  pos={pos_mm:.2f} mm  spd={spd_mms:.2f} mm/s  "
+            f"accel={accel_eff:.2f} mm/s²  decel={decel_eff:.2f} mm/s²  "
             f"({int(pos_mm*self._spm)} steps  {int(spd_mms*self._spm)} Hz)"
         )
         self._publish_status("busy")
 
-        if self._move(pos_mm, spd_mms):
+        if self._move(pos_mm, spd_mms, accel_raw=accel_raw, decel_raw=decel_raw):
             self._publish_status("running")
         else:
             self._publish_status("error")

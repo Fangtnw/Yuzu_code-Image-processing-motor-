@@ -22,6 +22,9 @@ MOTORS = [
         "label": "Z Axis (M①)",
         "ns":    "motor_z",
         "type":  "linear",
+        "default_speed_mms": 15.0,
+        "default_accel_mms2": 1.0,
+        "default_decel_mms2": 1.0,
     },
     {
         "label":               "Yuzu Rotation (M②)",
@@ -29,18 +32,24 @@ MOTORS = [
         "type":                "rotary",
         "default_rpm":         225.0,
         "rpm_hint":            "spec: 200-250 rpm  CCW",
-        "default_accel_rpm_s":  50.0,
-        "default_decel_rpm_s":   0.0,
+        "default_accel_rpm_s": 750.0,
+        "default_decel_rpm_s": 750.0,
     },
     {
         "label": "Peeler Feed 3 (M③)",
         "ns":    "motor_peeler_3",
         "type":  "linear",
+        "default_speed_mms": 8.0,
+        "default_accel_mms2": 1.0,
+        "default_decel_mms2": 1.0,
     },
     {
         "label": "Peeler Feed 4 (M④)",
         "ns":    "motor_peeler_4",
         "type":  "linear",
+        "default_speed_mms": 8.0,
+        "default_accel_mms2": 1.0,
+        "default_decel_mms2": 1.0,
     },
     {
         "label":               "Peeler Orbit (M⑤)",
@@ -49,13 +58,16 @@ MOTORS = [
         "default_angle_deg":   90.0,
         "default_rpm":         20.0,
         "rpm_hint":            "spec: 20 rpm  CW",
-        "default_accel_rpm_s": 20.0,
-        "default_decel_rpm_s":  0.0,
+        "default_accel_rpm_s": 100.0,
+        "default_decel_rpm_s": 100.0,
     },
     {
         "label": "Conveyor (M⑥)",
         "ns":    "motor_conveyor",
         "type":  "linear",
+        "default_speed_mms": 20.0,
+        "default_accel_mms2": 1.0,
+        "default_decel_mms2": 1.0,
     },
 ]
 
@@ -280,6 +292,10 @@ class MotorPanel:
         _log_print(self._log, "Panel ready.")
 
     def _build_linear(self, pad):
+        default_speed = self._cfg.get("default_speed_mms", 5.0)
+        default_accel = self._cfg.get("default_accel_mms2", 1.0)
+        default_decel = self._cfg.get("default_decel_mms2", 1.0)
+
         f = ttk.LabelFrame(self._frame, text="Motion Command", padding=12)
         f.grid(row=1, column=0, columnspan=3, sticky="ew", **pad)
 
@@ -289,7 +305,7 @@ class MotorPanel:
         tk.Label(f, text=f"[0 - {MAX_POS}]", fg="gray").grid(row=0, column=2, sticky="w", padx=(6, 0))
 
         tk.Label(f, text="Speed (mm/s)").grid(row=1, column=0, sticky="w", pady=4)
-        self._spd_var = tk.StringVar(value="5.0")
+        self._spd_var = tk.StringVar(value=str(default_speed))
         ttk.Entry(f, textvariable=self._spd_var, width=10).grid(row=1, column=1, sticky="w", padx=(8, 0))
         tk.Label(f, text=f"[{MIN_SPEED} - {MAX_SPEED}]", fg="gray").grid(row=1, column=2, sticky="w", padx=(6, 0))
 
@@ -299,12 +315,17 @@ class MotorPanel:
         tk.Label(f, text="optional", fg="gray").grid(row=2, column=2, sticky="w", padx=(6, 0))
 
         tk.Label(f, text="Accel (mm/s²)").grid(row=3, column=0, sticky="w", pady=4)
-        self._accel_var = tk.StringVar(value="50.0")
+        self._accel_var = tk.StringVar(value=str(default_accel))
         ttk.Entry(f, textvariable=self._accel_var, width=10).grid(row=3, column=1, sticky="w", padx=(8, 0))
-        tk.Label(f, text="USB timing only", fg="gray").grid(row=3, column=2, sticky="w", padx=(6, 0))
+        tk.Label(f, text=f"[{MIN_ACCEL} - {MAX_ACCEL}]", fg="gray").grid(row=3, column=2, sticky="w", padx=(6, 0))
+
+        tk.Label(f, text="Decel (mm/s²)").grid(row=4, column=0, sticky="w", pady=4)
+        self._decel_var = tk.StringVar(value=str(default_decel))
+        ttk.Entry(f, textvariable=self._decel_var, width=10).grid(row=4, column=1, sticky="w", padx=(8, 0))
+        tk.Label(f, text=f"[{MIN_ACCEL} - {MAX_ACCEL}]", fg="gray").grid(row=4, column=2, sticky="w", padx=(6, 0))
 
         ttk.Button(f, text="Send Command", command=self._on_send).grid(
-            row=4, column=0, columnspan=3, pady=(10, 0), sticky="ew")
+            row=5, column=0, columnspan=3, pady=(10, 0), sticky="ew")
 
         hf = ttk.LabelFrame(self._frame, text="Homing", padding=12)
         hf.grid(row=2, column=0, columnspan=3, sticky="ew", **pad)
@@ -419,8 +440,9 @@ class MotorPanel:
             pos   = float(self._pos_var.get().strip())
             spd   = float(self._spd_var.get().strip())
             accel = float(self._accel_var.get().strip())
+            decel = float(self._decel_var.get().strip())
         except ValueError:
-            messagebox.showerror("Invalid Input", "Position, speed, and acceleration must be numbers.")
+            messagebox.showerror("Invalid Input", "Position, speed, accel, and decel must be numbers.")
             return
 
         time_text = self._time_var.get().strip()
@@ -438,6 +460,9 @@ class MotorPanel:
         if not (MIN_ACCEL <= accel <= MAX_ACCEL):
             messagebox.showerror("Out of Range", f"Acceleration must be {MIN_ACCEL} - {MAX_ACCEL} mm/s².")
             return
+        if not (MIN_ACCEL <= decel <= MAX_ACCEL):
+            messagebox.showerror("Out of Range", f"Deceleration must be {MIN_ACCEL} - {MAX_ACCEL} mm/s².")
+            return
 
         if duration is not None:
             if duration <= 0.0:
@@ -451,15 +476,15 @@ class MotorPanel:
             messagebox.showerror("Out of Range", f"Speed must be {MIN_SPEED} - {MAX_SPEED} mm/s.")
             return
 
-        if duration is None:
-            self._node.send_cmd(pos, spd)
-        else:
-            self._node.send_cmd(pos, spd, accel, accel, duration)
+        self._node.send_cmd(pos, spd, accel, decel, duration)
         self._last_pos_mm = pos
 
-        log_line = f">> motor_cmd  pos={pos} mm  speed={spd:.3f} mm/s"
+        log_line = (
+            f">> motor_cmd  pos={pos} mm  speed={spd:.3f} mm/s  "
+            f"accel={accel:g} mm/s²  decel={decel:g} mm/s²"
+        )
         if duration is not None:
-            log_line += f"  accel={accel:g} mm/s²  time={duration:g} s"
+            log_line += f"  time={duration:g} s"
         _log_print(self._log, log_line)
 
     def _speed_for_duration(self, distance_mm: float, duration_s: float, accel_mms2: float) -> float | None:
