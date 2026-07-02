@@ -1,0 +1,22 @@
+# AZD3A-KED CiA402 slave config for ethercat_driver_ros2.
+# Source ESI: AZD-KED/ORIENTALMOTOR_AZD-KED_rev0001.xml
+
+vendor_id: 0x000002BE
+product_id: 0x000013E5
+auto_fault_reset: false
+
+rpdo:
+  - index: 0x1601
+    channels:
+      - {index: 0x6040, sub_index: 0, type: uint16, default: 0}
+      - {index: 0x607a, sub_index: 0, type: int32, command_interface: position, default: .nan}
+      - {index: 0x60ff, sub_index: 0, type: int32, command_interface: velocity, default: 0}
+      - {index: 0x6060, sub_index: 0, type: int8, default: 8}
+      - {index: 0x60b8, sub_index: 0, type: uint16, default: 0}
+
+tpdo:
+  - index: 0x1a00
+    channels:
+      - {index: 0x6041, sub_index: 0, type: uint16}
+      - {index: 0x6064, sub_index: 0, type: int32, state_interface: position}
+      - {index: 0x6061, sub_index: 0, type: int8}
