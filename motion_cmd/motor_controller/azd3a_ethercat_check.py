@@ -1,10 +1,12 @@
 """Python check controller for one AZD3A-KED EtherCAT basic test."""
 
 import argparse
+import re
 import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 
 
 @dataclass(frozen=True)
@@ -24,6 +26,8 @@ CHECKS = (
         ["ros2", "pkg", "prefix", "ethercat_generic_plugins"],
     ),
 )
+
+ETHERCAT_CONFIG = Path("/etc/sysconfig/ethercat")
 
 
 def _format_command(command: list[str]) -> str:
@@ -66,6 +70,31 @@ def _run_check(check: Check, dry_run: bool) -> bool:
     return True
 
 
+def _read_ethercat_config_value(text: str, key: str) -> str | None:
+    match = re.search(rf"^\s*{re.escape(key)}\s*=\s*\"([^\"]*)\"", text, re.MULTILINE)
+    return match.group(1) if match else None
+
+
+def _print_igh_config_hints() -> None:
+    if not ETHERCAT_CONFIG.exists():
+        print(f"- IgH config file is missing: {ETHERCAT_CONFIG}")
+        return
+
+    try:
+        text = ETHERCAT_CONFIG.read_text(encoding="utf-8")
+    except OSError as exc:
+        print(f"- Could not read {ETHERCAT_CONFIG}: {exc}")
+        return
+
+    master0_device = _read_ethercat_config_value(text, "MASTER0_DEVICE")
+    device_modules = _read_ethercat_config_value(text, "DEVICE_MODULES")
+
+    if master0_device == "":
+        print(f"- {ETHERCAT_CONFIG}: set MASTER0_DEVICE to the EtherCAT NIC MAC or interface name")
+    if device_modules == "":
+        print(f"- {ETHERCAT_CONFIG}: set DEVICE_MODULES, usually \"generic\" for first bring-up")
+
+
 def _print_next_steps(success: bool, dry_run: bool) -> None:
     print("\n== Result ==")
     if dry_run:
@@ -85,6 +114,7 @@ def _print_next_steps(success: bool, dry_run: bool) -> None:
     print("- Cable from Ubuntu spare NIC to ECAT IN")
     print("- IgH master service: sudo /etc/init.d/ethercat start")
     print("- Correct NIC MAC in /etc/sysconfig/ethercat")
+    _print_igh_config_hints()
     print("- ROS2 workspace is sourced: source install/setup.bash")
 
 
