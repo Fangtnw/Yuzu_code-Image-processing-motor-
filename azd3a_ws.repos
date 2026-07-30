@@ -1,0 +1,5 @@
+repositories:
+  ethercat_driver_ros2:
+    type: git
+    url: https://github.com/ICube-Robotics/ethercat_driver_ros2.git
+    version: 97c6dc3afbb89928901043ad06d1d1e5f7be104f

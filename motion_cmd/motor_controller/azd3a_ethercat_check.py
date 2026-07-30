@@ -22,8 +22,12 @@ CHECKS = (
     Check("Read EtherCAT SDO dictionary", ["ethercat", "sdos"]),
     Check("Find ROS2 ethercat_driver package", ["ros2", "pkg", "prefix", "ethercat_driver"]),
     Check(
-        "Find ROS2 ethercat_generic_plugins package",
-        ["ros2", "pkg", "prefix", "ethercat_generic_plugins"],
+        "Find ROS2 generic EtherCAT slave plugin",
+        ["ros2", "pkg", "prefix", "ethercat_generic_slave"],
+    ),
+    Check(
+        "Find ROS2 CiA402 EtherCAT drive plugin",
+        ["ros2", "pkg", "prefix", "ethercat_generic_cia402_drive"],
     ),
 )
 

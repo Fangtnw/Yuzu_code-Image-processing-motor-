@@ -1,22 +1,24 @@
 # AZD3A-KED CiA402 slave config for ethercat_driver_ros2.
-# Source ESI: AZD-KED/ORIENTALMOTOR_AZD-KED_rev0001.xml
+# Source ESI: vendor/oriental_motor/ORIENTALMOTOR_AZDxA-KED_rev0301.xml
+# Verified live identity: vendor 0x02BE, product 0x13AF, revision 0x01110301.
+# This first bring-up config intentionally maps Axis 1 position control only.
 
 vendor_id: 0x000002BE
-product_id: 0x000013E5
+product_id: 0x000013AF
 auto_fault_reset: false
 
 rpdo:
-  - index: 0x1601
+  - index: 0x1600
     channels:
       - {index: 0x6040, sub_index: 0, type: uint16, default: 0}
-      - {index: 0x607a, sub_index: 0, type: int32, command_interface: position, default: .nan}
-      - {index: 0x60ff, sub_index: 0, type: int32, command_interface: velocity, default: 0}
+      # ROS prismatic position [m] -> AZD3A counts at 10,000 counts/mm.
+      - {index: 0x607a, sub_index: 0, type: int32, command_interface: position, factor: 10000000.0, default: .nan}
       - {index: 0x6060, sub_index: 0, type: int8, default: 8}
-      - {index: 0x60b8, sub_index: 0, type: uint16, default: 0}
 
 tpdo:
   - index: 0x1a00
     channels:
       - {index: 0x6041, sub_index: 0, type: uint16}
-      - {index: 0x6064, sub_index: 0, type: int32, state_interface: position}
+      # AZD3A counts -> ROS prismatic position [m].
+      - {index: 0x6064, sub_index: 0, type: int32, state_interface: position, factor: 0.0000001}
       - {index: 0x6061, sub_index: 0, type: int8}

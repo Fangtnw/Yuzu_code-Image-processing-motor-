@@ -14,10 +14,11 @@ or multi-axis motion yet.
 The YAML records the AZD-KED ESI identity and important CiA402 objects:
 
 - vendor: `0x000002BE`
-- product: `0x000013E5`
-- RxPDO: `0x1601`
+- product: `0x000013AF`
+- revision: `0x01110301`
+- RxPDO: `0x1600`
 - TxPDO: `0x1A00`
-- objects: `0x6040`, `0x6041`, `0x6060`, `0x6061`, `0x6064`, `0x607A`, `0x60FF`
+- objects: `0x6040`, `0x6041`, `0x6060`, `0x6061`, `0x6064`, `0x607A`
 
 ## Hardware Setup
 
@@ -64,7 +65,8 @@ This Python check controller checks:
 - `ethercat pdos`
 - `ethercat sdos`
 - `ethercat_driver` package availability
-- `ethercat_generic_plugins` package availability
+- `ethercat_generic_slave` package availability
+- `ethercat_generic_cia402_drive` package availability
 
 To see what it will run without touching hardware:
 

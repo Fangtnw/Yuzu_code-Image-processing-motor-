@@ -1,0 +1,45 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="azd3a_axis1_feedback">
+  <!--
+    Feedback-only EtherCAT bring-up for AZD3A Axis 1.
+
+    GenericEcSlave is intentional: it does not perform CiA 402 automatic state
+    transitions. The configured Controlword default remains zero, so this file
+    must not enable or move the actuator.
+  -->
+  <link name="axis1_base"/>
+  <link name="axis1_table"/>
+
+  <joint name="axis1_joint" type="prismatic">
+    <parent link="axis1_base"/>
+    <child link="axis1_table"/>
+    <axis xyz="1 0 0"/>
+    <!-- Conservative reference limits for the 30 mm actuator. No controller
+         is loaded by the feedback-only launch. -->
+    <limit lower="0.000" upper="0.029" velocity="0.001" effort="40.0"/>
+  </joint>
+
+  <ros2_control name="AZD3A_axis1_feedback" type="system">
+    <hardware>
+      <plugin>ethercat_driver/EthercatDriver</plugin>
+      <param name="master_id">0</param>
+      <param name="control_frequency">100</param>
+      <param name="number_of_physical_drives">1</param>
+    </hardware>
+
+    <joint name="axis1_joint">
+      <command_interface name="position">
+        <param name="min">0.000</param>
+        <param name="max">0.029</param>
+      </command_interface>
+      <state_interface name="position"/>
+
+      <ec_module name="azd3a_axis1">
+        <plugin>ethercat_generic_plugins/GenericEcSlave</plugin>
+        <param name="alias">0</param>
+        <param name="position">0</param>
+        <param name="slave_config">$(find motor_controller)/config/azd3a_ked_cia402_slave.yaml</param>
+      </ec_module>
+    </joint>
+  </ros2_control>
+</robot>

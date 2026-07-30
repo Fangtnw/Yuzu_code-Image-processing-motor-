@@ -11,6 +11,8 @@ setup(
         ("share/ament_index/resource_index/packages", ["resource/motor_controller"]),
         (f"share/{package_name}", ["package.xml", *glob("*.md")]),
         (f"share/{package_name}/config", glob("config/*.yaml")),
+        (f"share/{package_name}/launch", glob("launch/*.launch.py")),
+        (f"share/{package_name}/urdf", glob("urdf/*.xacro")),
     ],
     install_requires=["setuptools"],
     zip_safe=True,
@@ -22,6 +24,7 @@ setup(
         "console_scripts": [
             f"azd3a_basic_test           = {package_name}.azd3a_basic_test_node:main",
             f"azd3a_ethercat_check       = {package_name}.azd3a_ethercat_check:main",
+            f"azd3a_axis1_video_demo     = {package_name}.azd3a_axis1_video_demo:main",
         ],
     },
 )
