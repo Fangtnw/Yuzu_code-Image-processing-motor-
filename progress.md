@@ -29,23 +29,27 @@ The discovery and software-installation phase is complete.
   - `ethercat_generic_cia402_drive`
   - `motor_controller`
 
-The motor has not been commanded to move. The next engineering task is a
-minimal, reviewed one-axis `ros2_control` description and launch configuration.
+Axis 1 has now been commanded through ROS 2 and physical motion was confirmed.
+The next engineering task is to make that one-axis motion repeatable with
+captured feedback evidence before adding Axis 2 or Axis 3 motion.
 
 ## Connected Motors and Actuator
 
 | Axis | Connected hardware | Type |
 | --- | --- | --- |
-| Axis 1 | `DR28T1A03-AZAKR` | 1 mm-lead, 30 mm-stroke linear actuator |
-| Axis 2 | `AZM46AK-FC20DA` | 20:1 geared rotary stepper motor |
-| Axis 3 | `AZM46AK-FC20DA` | 20:1 geared rotary stepper motor |
+| Axis 1 | `DR28T1A03-AZAKR` | Machine Motor 3/4 actuator type, currently wired to Axis 1 for bring-up; 1 mm-lead, 30 mm-stroke linear actuator |
+| Axis 2 | `AZM46AK-FC7.2UA` | Machine Motor 2 rotary axis; 200-250 rpm spin/stop target role |
+| Axis 3 | `AZM46AK-FC20DA` | Machine Motor 5 rotary axis; 20 rpm rotational target role |
 
-All three connected device models are confirmed by the Oriental Motor catalog.
-Axis 1 is a guided table actuator with a 1 mm ball-screw lead, 30 mm stroke,
-40 mm/s maximum speed, and 0.001 mm minimum travel amount. Axes 2/3 are 42 mm
-right-angle spur/face-geared AZ motors with 20:1 gearboxes and mechanical
-absolute encoders. Complete hardware and preliminary scaling notes are recorded
-in `motion_cmd/AZD3A_HARDWARE.md`.
+The `DR28T1A03-AZAKR` is not throwaway hardware; it is the machine Motor 3/4
+actuator type from the mechanism plan. For the current one-drive bring-up, one
+of these actuators is wired to AZD3A Axis 1, so the software names it
+`axis1_joint`. It is not the final machine Motor 1. It is a guided table
+actuator with a 1 mm ball-screw lead, 30 mm stroke, 40 mm/s maximum speed, and
+0.001 mm minimum travel amount. Axis 2 and Axis 3 are different rotary
+motor/gearbox models, so their scaling must be confirmed separately from
+physical labels, MEXE02, and live SDO settings before motion. Complete hardware
+and preliminary scaling notes are recorded in `motion_cmd/AZD3A_HARDWARE.md`.
 
 ## Verified Read-only Drive State
 

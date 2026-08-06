@@ -4,6 +4,12 @@ This records the physical devices connected during the one-drive bring-up.
 Model strings should be checked against the physical labels before scaling or
 motion limits are treated as final.
 
+Axis numbering here follows the current AZD3A bring-up wiring. It is not the
+same thing as the final machine motor numbering. Axis 1 currently uses a
+`DR28T1A03-AZAKR` linear actuator for EtherCAT/ROS 2 validation. That actuator
+model is the machine Motor 3/4 type in the mechanism plan, but it is wired to
+AZD3A Axis 1 right now.
+
 ## EtherCAT drive
 
 | Item | Value |
@@ -19,9 +25,9 @@ motion limits are treated as final.
 
 | AZD3A axis | Connected device | Motion type | Verification |
 | --- | --- | --- | --- |
-| Axis 1 | `DR28T1A03-AZAKR` | Linear | Confirmed in Oriental Motor catalog |
-| Axis 2 | `AZM46AK-FC20DA` | Rotary | Confirmed in Oriental Motor catalog |
-| Axis 3 | `AZM46AK-FC20DA` | Rotary | Confirmed in Oriental Motor catalog |
+| Axis 1 | `DR28T1A03-AZAKR` | Linear, machine Motor 3/4 type currently wired to Axis 1 | Confirmed in Oriental Motor catalog |
+| Axis 2 | `AZM46AK-FC7.2UA` | Rotary speed / spin-stop, machine Motor 2 | User-corrected physical model; verify scaling before motion |
+| Axis 3 | `AZM46AK-FC20DA` | Rotary speed / optional angle, machine Motor 5 | Confirmed in Oriental Motor catalog |
 
 ## Axis 1: linear actuator
 
@@ -86,7 +92,16 @@ Before Axis 1 motion:
    AZD3A using MEXE02 as required by the vendor manual.
 4. Read the configured electronic gear/mechanism parameters from MEXE02 or SDO.
 
-## Axes 2 and 3: geared rotary motors
+## Axis 2: rotary Motor 2
+
+The corrected Axis 2 / machine Motor 2 model is `AZM46AK-FC7.2UA`. Its
+sequence role is rotational motion at about 200-250 rpm with spin/stop control.
+Do not reuse the `AZM46AK-FC20DA` 20:1 scaling for Axis 2. The gear ratio,
+resolution setting, electronic gear, velocity unit conversion, and safe rpm
+limit must be confirmed from the physical motor label, MEXE02, and live SDO
+settings before enabling motion.
+
+## Axis 3: rotary Motor 5
 
 Oriental Motor identifies `AZM46AK-FC20DA` as:
 
@@ -99,7 +114,7 @@ Oriental Motor identifies `AZM46AK-FC20DA` as:
 - nominal resolution 0.018 degrees/pulse when the resolution setting is
   1000 P/R
 
-At that stated setting, the output-shaft conversion is:
+At that stated setting, the Axis 3 output-shaft conversion is:
 
 ```text
 20,000 counts/output revolution
@@ -107,9 +122,10 @@ At that stated setting, the output-shaft conversion is:
 3183.098862 counts/rad
 ```
 
-These values are reference calculations, not yet active configuration.
-MEXE02/SDO settings must confirm that the actual electronic gear and resolution
-match the catalog condition before they are used as ROS scaling factors.
+These values are reference calculations for Axis 3 only, not yet active
+configuration. MEXE02/SDO settings must confirm that the actual electronic
+gear and resolution match the catalog condition before they are used as ROS
+scaling factors.
 
 ## Axis-specific CiA 402 objects
 
@@ -146,6 +162,8 @@ values are valid absolute multi-turn position counts, not fault codes.
   <https://catalog.orientalmotor.com/item/az-series-multi-axis-controllers-drivers/ethercat-multi-axis-controllers-az-dc-input/azd3a-ked>
 - DR28T1A03-AZAKR:
   <https://www.orientalmotor.co.jp/ja/products/detail?hinmei=DR28T1A03-AZAKR>
+- AZM46AK-FC7.2UA:
+  physical-label/user-corrected model; catalog link still to be recorded
 - AZM46AK-FC20DA:
   <https://catalog.orientalmotor.com/item/az-series-42mm-absolute-stepper-motors/az-series-42mm-absolute-encoder-stepper-motors-dc/azm46ak-fc20da>
 - Multi-axis EtherCAT manual:
