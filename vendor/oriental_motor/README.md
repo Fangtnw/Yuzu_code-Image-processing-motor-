@@ -15,6 +15,13 @@ reviewed and reproduced without relying on terminal output or browser history.
     User Manual*.
   - Download:
     <https://www.orientalmotor.com/products/pdfs/opmanuals/HM-60323-7E.pdf>
+- `AZ_Family_Catalog_2018-2019.pdf`
+  - Official Oriental Motor AZ Series family catalog used to verify the
+    `AZM46AK-FC7.2UA` mechanical specifications: 7.2:1 FC gear, 0.05 degree
+    per pulse at the catalog's 1000 P/R setting, and 0 to 416 r/min permissible
+    output speed.
+  - Download:
+    <https://www.orientalmotor.com/products/pdfs/2018-2019/502%20AZ%20Family%20Catalog.pdf>
 - `SHA256SUMS`
   - SHA-256 checksums for detecting accidental file changes.
 

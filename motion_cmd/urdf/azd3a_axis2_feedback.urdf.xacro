@@ -1,0 +1,34 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="azd3a_axis2_feedback">
+  <!-- Read-only bring-up for AZM46AK-FC7.2UA on AZD3A Axis 2. -->
+  <link name="axis2_base"/>
+  <link name="axis2_output"/>
+
+  <joint name="axis2_joint" type="continuous">
+    <parent link="axis2_base"/>
+    <child link="axis2_output"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+
+  <ros2_control name="AZD3A_axis2_feedback" type="system">
+    <hardware>
+      <plugin>ethercat_driver/EthercatDriver</plugin>
+      <param name="master_id">0</param>
+      <param name="control_frequency">200</param>
+      <param name="number_of_physical_drives">1</param>
+    </hardware>
+
+    <joint name="axis2_joint">
+      <!-- No command interface: this launch cannot command Axis 2. -->
+      <state_interface name="position"/>
+      <state_interface name="velocity"/>
+
+      <ec_module name="azd3a_axis2">
+        <plugin>ethercat_generic_plugins/GenericEcSlave</plugin>
+        <param name="alias">0</param>
+        <param name="position">0</param>
+        <param name="slave_config">$(find motor_controller)/config/azd3a_axis2_feedback_slave.yaml</param>
+      </ec_module>
+    </joint>
+  </ros2_control>
+</robot>

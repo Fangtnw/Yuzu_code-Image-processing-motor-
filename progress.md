@@ -1,6 +1,6 @@
 # EtherCAT Bring-up Progress
 
-Last updated: 2026-07-30
+Last updated: 2026-08-06
 
 ## Goal
 
@@ -320,3 +320,282 @@ the exact typed confirmation `VIDEO MOVE`. It performs one slow absolute
 round trip from the current position to `5 mm`, then back to `1 mm`, at about
 `0.5 mm/s`. It does not loop. The node passed syntax/tests, was rebuilt, and
 is installed, but its video motion has not yet been executed.
+
+## Axis 1 Measured Motion Evidence
+
+Task 1 of `AXIS1_NEXT_STEPS_PLAN.md` is complete. During the first attempt,
+the drive entered fault with Statusword `0x0238`. After stopping ROS, SDO
+`0x603F:00` reported `0xFF34`. The official manual identifies alarm `34h` as
+Command pulse error.
+
+The CSP configuration had been running in EtherCAT Free Run mode. Enabling the
+ESI-specified Distributed Clock setting `assign_activate: 0x0300` initially
+left the drive unable to reach OP because the previous 100 Hz rate meant a
+10 ms Sync0 cycle. AZD3A supports DC cycles of 0.5 ms or 1 through 8 ms, so the
+hardware and controller rates were changed to 200 Hz (5 ms). After rebuilding,
+the launch reported:
+
+```text
+Domain: WC 3
+Master AL states: 0x08
+Slave: State 0x08
+STATE: Operation Enabled with status word :567
+```
+
+No subsequent fault was observed. An absolute target of `0.0001 m` was sent,
+and settled `/joint_states` feedback reported:
+
+```yaml
+name:
+- axis1_joint
+position:
+- 9.999999999999999e-05
+velocity:
+- .nan
+effort:
+- .nan
+```
+
+This is measured position feedback, not only visual observation. The reported
+value is the floating-point representation of `0.0001 m`, equal to `0.1 mm`
+or 1,000 drive counts with the verified Axis 1 scaling. This validates
+commanded and measured convergence for the first Task 1 target.
+
+## Axis 1 Repeatability Sequence
+
+Task 2 measured feedback was captured for four consecutive absolute targets:
+
+| Step | Command | Settled `/joint_states` position |
+| ---: | ---: | ---: |
+| 1 | `0.0001 m` (0.1 mm) | `9.999999999999999e-05 m` |
+| 2 | `0.0005 m` (0.5 mm) | `0.0005 m` |
+| 3 | `0.0010 m` (1.0 mm) | `0.001 m` |
+| 4 | `0.0001 m` (0.1 mm return) | `9.999999999999999e-05 m` |
+
+All reported positions converged to their commands at the available count
+resolution, including the reverse move from 1.0 mm to 0.1 mm. This demonstrates
+repeatable bidirectional commanded/measured behavior over the tested first
+millimetre. The operator confirmed that positive commands moved in the expected
+physical direction and that there was no abnormal sound, alarm, noticeable
+delay, or overshoot during the sequence. Task 2 is complete.
+
+## Axis 1 Command Guard and Commissioning Limits
+
+After Task 2, an accidental absolute command of `0.011 m` (11 mm) was
+published through the unguarded forward controller. The drive generated alarm
+`0xFF34` (Command pulse error) and stopped the command. After ROS exited, the
+actual position was `10,000` counts, equal to 1.0 mm, so the actuator did not
+travel to 11 mm. This demonstrated that the previous xacro `0..29 mm` metadata
+was not sufficient runtime protection for direct topic commands.
+
+Task 3 introduced a guarded public command path:
+
+```text
+/axis1_position_controller/commands
+  -> azd3a_axis1_command_guard
+  -> /axis1_raw_position_controller/commands
+  -> ros2_control / EtherCAT
+```
+
+The guard:
+
+- rejects non-finite, malformed, or out-of-range commands;
+- permits only absolute targets from 0 to 5 mm;
+- limits generated velocity to 0.5 mm/s;
+- limits generated acceleration/deceleration to 1.0 mm/s^2;
+- initializes its command from measured `/joint_states` feedback;
+- publishes a smooth 200 Hz CSP position trajectory to the renamed raw
+controller.
+
+Both Axis 1 xacros now distinguish the manufacturer envelope (30 mm stroke,
+40 mm/s maximum velocity, 40 N effort metadata) from the tighter runtime
+commissioning settings. The public topic used by existing commands and the video
+demo is unchanged, but it now passes through the runtime guard. The code,
+xacros, and existing tests validated successfully, and `motor_controller` was
+rebuilt.
+
+The hardware rejection test then passed. With the drive in Operation Enabled,
+the public topic reported `azd3a_axis1_command_guard` as its only subscriber.
+Publishing the previous accidental target `0.011 m` produced:
+
+```text
+REJECTED Axis 1 target 0.011000 m: permitted range is 0.000..0.005 m
+```
+
+The drive remained Operation Enabled with no new fault, and the rejected
+command was not forwarded to the raw controller. A valid bounded-motion test
+then commanded an absolute `0.0005 m` target from the guarded public topic.
+The guard logged `Accepted Axis 1 target 0.500 mm`, and settled feedback was:
+
+```text
+0.0004992999999999999 m = 0.4993 mm = 4,993 counts
+```
+
+The 7-count (`0.0007 mm`) difference from the 5,000-count target is inside the
+actuator's ±0.01 mm repetitive-positioning specification. No new fault was
+observed. This validates both rejection of unsafe commands and forwarding of a
+valid velocity/acceleration-limited trajectory through the guarded path.
+
+The official DR28T1A03-AZAKR catalog also specifies maximum acceleration of
+`0.2 m/s^2` and minimum travel amount of `0.001 mm`. The command guard encodes
+the manufacturer envelope as non-overridable caps:
+
+```text
+position:     0..30 mm
+velocity:     at most 40 mm/s
+acceleration: at most 0.2 m/s^2
+increment:    multiples of 0.001 mm
+```
+
+After successful rejection and bounded-motion testing in the first 5 mm, the
+Axis 1 motion launch commissioning range was expanded to `0..15 mm` for a
+recorded mid-stroke round trip. Velocity remains `0.5 mm/s` and acceleration
+remains `0.001 m/s^2`. The feedback-only configuration retains its 5 mm command
+metadata because it is not intended to command motion. Invalid guard
+configurations beyond the catalog
+caps make the node fail rather than silently accepting an unsafe setting.
+The catalog's 40 N force and 4 kg payload ratings are documented but cannot be
+enforced by the current position-only PDO mapping because effort/load feedback
+is not exported.
+
+## Axis 1 Mid-stroke Recording
+
+After the guarded rejection and 0.5 mm motion tests passed, the motion-launch
+commissioning boundary was expanded from 5 mm to 15 mm. The manufacturer hard
+caps remained unchanged. The operator recorded a guarded absolute move to
+15 mm and a return to the selected safe near-home position of 1 mm using:
+
+```bash
+ros2 topic pub --once /axis1_position_controller/commands \
+  std_msgs/msg/Float64MultiArray "{data: [0.015]}"
+
+ros2 topic pub --once /axis1_position_controller/commands \
+  std_msgs/msg/Float64MultiArray "{data: [0.001]}"
+```
+
+The guard settings were 0.5 mm/s maximum velocity and 1 mm/s^2 maximum
+acceleration/deceleration. The operator reported the recording task finished.
+The video is evidence of visible guarded Axis 1 motion; the exact settled
+15 mm and return `/joint_states` messages were not provided in this session,
+so measured endpoint convergence for this particular round trip is not claimed.
+Earlier Task 1/2 moves do have captured measured convergence.
+
+## Axis 1 Handoff to Axis 2
+
+Axis 1 has now demonstrated:
+
+- stable EtherCAT OP with DC Sync0 at a supported 5 ms cycle;
+- exact measured feedback scaling at 10,000 counts/mm;
+- repeatable bidirectional absolute positioning;
+- rejection of an unsafe 11 mm command outside the then-active boundary;
+- a guarded 0..15 mm commissioning range;
+- velocity- and acceleration-limited CSP command generation;
+- physical/video motion evidence with no reported abnormal behavior during the
+  completed tests.
+
+Axis 2 work may now begin at the read-only stage. Do not enable Axis 2 until
+its `AZM46AK-FC7.2UA` identity, live position, electronic gear/resolution,
+velocity-unit conversion, safe rpm limit, direction, and stop behavior have
+been verified. Do not reuse Axis 3's FC20DA 20:1 reference scaling.
+
+### Axis 2 read-only scaling preparation (2026-08-06)
+
+The stationary Axis 2 baseline reported error `0x0000`, statusword `0x0270`,
+mode 0, actual position 5,641,556 steps, and zero velocity. Further read-only
+SDOs reported mechanism setting 1, gear-ratio override 0, rotation-direction
+setting 1, and zero command/actual r/min.
+
+Official Oriental Motor product data confirms `AZM46AK-FC7.2UA` is a 7.2:1 FC
+geared motor with a permissible output speed of 0 to 416 r/min. The live
+electronic gear A=1 and B=1 combines with the AZD3A manual formula
+`resolution = 10,000 * B/A` to give 10,000 steps/output revolution. Therefore
+Axis 2 position and `0x686C` velocity scaling are both
+`2*pi/10,000 = 0.0006283185307179586` to produce ROS radians and radians/s.
+
+An official AZ family catalog was added at
+`vendor/oriental_motor/AZ_Family_Catalog_2018-2019.pdf`. A new staged launch,
+`azd3a_axis2_feedback.launch.py`, uses only `GenericEcSlave`, Controlword=0,
+mode=0, and state interfaces. It deliberately contains no Axis 2 command
+interface and must be validated as feedback-only before any rotary motion.
+
+The first live ROS feedback-only test succeeded. `/joint_states` reported
+Axis 2 position `3544.694176883084 rad` and velocity `0.0 rad/s`. Dividing the
+reported position by `2*pi/10,000` reproduces the raw absolute position of
+5,641,556 steps exactly. `ros2 control list_hardware_interfaces` showed only
+`axis2_joint/position` and `axis2_joint/velocity` under state interfaces, with
+an empty command-interface section. Thus this launch cannot accept a motor
+command through ros2_control, and the measured position/velocity conversion is
+working as designed.
+
+### Axis 2 first guarded rotation (2026-08-06)
+
+The initial CSV launch exposed a limitation in the generic CiA 402 plugin: it
+recognized only the standard Axis 1 object indices and therefore did not run
+the state machine for Axis 2's objects at the standard indices plus `0x0800`.
+The driver was extended with a configurable `cia402_object_index_offset` while
+preserving zero as the single-axis/Axis 1 default. The Axis 2 xacro selects
+`0x0800`. The complete driver suite passed 48 tests with zero failures.
+
+After the fix, the live drive progressed through Switch On Disabled, Ready to
+Switch On, Switch On, and Operation Enabled while holding zero speed. A guarded
+5 rpm command then produced confirmed physical rotation. Viewed from the front
+along the output-shaft axis, positive velocity was clockwise. The command
+publisher ended after 6 seconds, the watchdog stopped the motor automatically,
+motion was reported normal, and the final Axis 2 alarm remained `0x0000`.
+
+The next commissioning boundary is 25 rpm with a 10 rpm/s acceleration and
+deceleration ramp. This is one tenth of the 250 rpm requirement endpoint and
+about 6 percent of the official 416 rpm motor limit; the guard still rejects
+all commands above the active commissioning boundary.
+
+The guarded operator interface was then changed to accept RPM directly on
+`/axis2_velocity_controller/commands_rpm`. The raw hardware controller remains
+in standard ROS rad/s; conversion is performed only inside the guard. This
+makes an operator command such as `{data: [25.0]}` unambiguous while preserving
+the standard ros2_control interface internally.
+
+### Axis 1 retained-position startup fault and interlock (2026-08-06)
+
+After the earlier recording, Axis 1 was stopped with `Ctrl+C` while physically
+near 15 mm instead of being commanded back toward the beginning of the stroke.
+That retained position was valid: the subsequent read was 149,993 counts, or
+14.9993 mm. Stopping away from origin was not itself a drive error and should
+remain a supported shutdown condition.
+
+On the next Axis 1 CSP launch, the drive reached Operation Enabled and then
+immediately faulted with statusword `0x0238`; SDO `0x603F` again reported
+`0xFF34` (command pulse error). The failure mechanism was a startup handoff:
+the generic position controller briefly supplied its default zero before the
+Axis 1 guard initialized from `/joint_states`. From a retained 14.9993 mm
+position, that created an approximately 15 mm one-cycle demand discontinuity.
+
+The CiA 402 plugin now supports an optional `position_startup_tolerance` CSP
+interlock. Axis 1 configures it as `0.00001 m` (0.01 mm). Until the raw
+controller command agrees with measured feedback within that tolerance, the
+plugin ignores the unmatched controller value and continuously holds the
+measured position. Once the guard publishes the feedback-matched starting
+value, normal guarded CSP commands are admitted. This removes any requirement
+to return Axis 1 to origin before stopping ROS while retaining the existing
+position, velocity, acceleration, and stroke guards.
+
+The driver and repository suites passed 49 tests with zero failures after this
+change, including a regression test that begins with measured position 15 and
+controller command zero, verifies that measured position is held, and then
+verifies synchronization when the command reaches 15.
+
+The first live attempt showed one additional startup detail: `/joint_states`
+can publish a temporary zero before EtherCAT reaches OP. The guard had latched
+that first zero even though later feedback correctly reported 14.9993 mm. The
+raw controller was active and received the requested 0.1 mm command, but the
+CSP interlock correctly kept holding the measured 14.9993 mm because startup
+had never synchronized. No movement or new alarm occurred during that blocked
+attempt.
+
+The guard was updated to follow measured feedback continuously until the first
+accepted operator command. It therefore replaces temporary pre-OP feedback
+with the true retained position, allowing the CSP interlock to synchronize
+before motion. After rebuilding, Axis 1 relaunched from the retained ~15 mm
+position, reached Operation Enabled without `0xFF34`, and physically moved
+under the guarded return command. This live result validates startup from a
+non-origin retained position; returning to zero before shutdown is not
+required.

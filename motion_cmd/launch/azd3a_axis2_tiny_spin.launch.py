@@ -1,4 +1,4 @@
-"""Launch the AZD3A Axis 1 tiny-motion configuration."""
+"""Launch guarded 25 rpm commissioning control for AZD3A Axis 2."""
 
 from pathlib import Path
 
@@ -14,74 +14,64 @@ from launch.substitutions import Command
 
 def generate_launch_description() -> LaunchDescription:
     package_share = Path(get_package_share_directory("motor_controller"))
-    xacro_file = package_share / "urdf" / "azd3a_axis1_tiny_move.urdf.xacro"
-    controllers_file = (
-        package_share / "config" / "azd3a_axis1_tiny_move_controllers.yaml"
-    )
     robot_description = {
         "robot_description": ParameterValue(
-            Command(["xacro ", str(xacro_file)]),
+            Command(
+                ["xacro ", str(package_share / "urdf" / "azd3a_axis2_tiny_spin.urdf.xacro")]
+            ),
             value_type=str,
         )
     }
-
     control_node = Node(
         package="controller_manager",
         executable="ros2_control_node",
-        parameters=[robot_description, str(controllers_file)],
+        parameters=[
+            robot_description,
+            str(package_share / "config" / "azd3a_axis2_tiny_spin_controllers.yaml"),
+        ],
         output="screen",
     )
-
     state_broadcaster = Node(
         package="controller_manager",
         executable="spawner",
         arguments=["joint_state_broadcaster", "-c", "/controller_manager"],
         output="screen",
     )
-
-    position_controller = Node(
+    velocity_controller = Node(
         package="controller_manager",
         executable="spawner",
-        arguments=["axis1_raw_position_controller", "-c", "/controller_manager"],
+        arguments=["axis2_raw_velocity_controller", "-c", "/controller_manager"],
         output="screen",
     )
-
     command_guard = Node(
         package="motor_controller",
-        executable="azd3a_axis1_command_guard",
+        executable="azd3a_axis2_velocity_guard",
         parameters=[
             {
-                # Conservative commissioning settings. The node rejects any
-                # configuration beyond the DR28T1A03-AZAKR specifications.
-                "min_position_m": 0.0,
-                # Expanded after successful 0..5 mm commissioning tests.
-                "max_position_m": 0.015,
-                "max_velocity_m_s": 0.0005,
-                "max_acceleration_m_s2": 0.001,
+                "max_rpm": 25.0,
+                "max_acceleration_rpm_s": 10.0,
+                "command_timeout_s": 0.5,
             }
         ],
         output="screen",
     )
-
     state_publisher = Node(
         package="robot_state_publisher",
         executable="robot_state_publisher",
         parameters=[robot_description],
         output="screen",
     )
-
     shutdown_on_control_exit = RegisterEventHandler(
         OnProcessExit(
             target_action=control_node,
             on_exit=[EmitEvent(event=Shutdown(reason="ros2_control_node exited"))],
         )
     )
-
     return LaunchDescription(
         [
             control_node,
             state_broadcaster,
-            position_controller,
+            velocity_controller,
             command_guard,
             state_publisher,
             shutdown_on_control_exit,

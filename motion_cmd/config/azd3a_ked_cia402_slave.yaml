@@ -5,6 +5,8 @@
 
 vendor_id: 0x000002BE
 product_id: 0x000013AF
+# AZD3A ESI DC Sync0 setting. CSP must not run in Free Run mode.
+assign_activate: 0x0300
 auto_fault_reset: false
 
 rpdo:

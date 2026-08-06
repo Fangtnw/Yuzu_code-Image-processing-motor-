@@ -12,21 +12,23 @@
     <parent link="axis1_base"/>
     <child link="axis1_table"/>
     <axis xyz="1 0 0"/>
-    <limit lower="0.000" upper="0.029" velocity="0.001" effort="40.0"/>
+    <!-- Manufacturer envelope; the runtime commissioning guard is tighter. -->
+    <limit lower="0.000" upper="0.030" velocity="0.040" effort="40.0"/>
   </joint>
 
   <ros2_control name="AZD3A_axis1_tiny_move" type="system">
     <hardware>
       <plugin>ethercat_driver/EthercatDriver</plugin>
       <param name="master_id">0</param>
-      <param name="control_frequency">100</param>
+      <!-- AZD3A DC mode supports 0.5 ms or 1-8 ms; 200 Hz = 5 ms. -->
+      <param name="control_frequency">200</param>
       <param name="number_of_physical_drives">1</param>
     </hardware>
 
     <joint name="axis1_joint">
       <command_interface name="position">
         <param name="min">0.000</param>
-        <param name="max">0.029</param>
+        <param name="max">0.015</param>
       </command_interface>
       <state_interface name="position"/>
 
@@ -34,6 +36,8 @@
         <plugin>ethercat_generic_plugins/EcCiA402Drive</plugin>
         <param name="alias">0</param>
         <param name="position">0</param>
+        <!-- Hold measured position until the raw controller synchronizes. -->
+        <param name="position_startup_tolerance">0.00001</param>
         <param name="mode_of_operation">8</param>
         <param name="slave_config">$(find motor_controller)/config/azd3a_ked_cia402_slave.yaml</param>
       </ec_module>

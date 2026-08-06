@@ -1,14 +1,15 @@
 controller_manager:
   ros__parameters:
-    update_rate: 100
+    update_rate: 200
 
     joint_state_broadcaster:
       type: joint_state_broadcaster/JointStateBroadcaster
 
-    axis1_position_controller:
+    # Raw hardware controller. Operator commands must go through the guard node.
+    axis1_raw_position_controller:
       type: position_controllers/JointGroupPositionController
 
-axis1_position_controller:
+axis1_raw_position_controller:
   ros__parameters:
     joints:
       - axis1_joint

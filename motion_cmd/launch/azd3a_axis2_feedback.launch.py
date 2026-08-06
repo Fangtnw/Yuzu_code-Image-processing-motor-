@@ -1,4 +1,4 @@
-"""Launch the AZD3A Axis 1 tiny-motion configuration."""
+"""Launch read-only ROS feedback for AZD3A Axis 2."""
 
 from pathlib import Path
 
@@ -14,9 +14,9 @@ from launch.substitutions import Command
 
 def generate_launch_description() -> LaunchDescription:
     package_share = Path(get_package_share_directory("motor_controller"))
-    xacro_file = package_share / "urdf" / "azd3a_axis1_tiny_move.urdf.xacro"
+    xacro_file = package_share / "urdf" / "azd3a_axis2_feedback.urdf.xacro"
     controllers_file = (
-        package_share / "config" / "azd3a_axis1_tiny_move_controllers.yaml"
+        package_share / "config" / "azd3a_axis2_feedback_controllers.yaml"
     )
     robot_description = {
         "robot_description": ParameterValue(
@@ -31,46 +31,19 @@ def generate_launch_description() -> LaunchDescription:
         parameters=[robot_description, str(controllers_file)],
         output="screen",
     )
-
     state_broadcaster = Node(
         package="controller_manager",
         executable="spawner",
-        arguments=["joint_state_broadcaster", "-c", "/controller_manager"],
+        arguments=["joint_state_broadcaster", "--controller-manager", "/controller_manager"],
         output="screen",
     )
-
-    position_controller = Node(
-        package="controller_manager",
-        executable="spawner",
-        arguments=["axis1_raw_position_controller", "-c", "/controller_manager"],
-        output="screen",
-    )
-
-    command_guard = Node(
-        package="motor_controller",
-        executable="azd3a_axis1_command_guard",
-        parameters=[
-            {
-                # Conservative commissioning settings. The node rejects any
-                # configuration beyond the DR28T1A03-AZAKR specifications.
-                "min_position_m": 0.0,
-                # Expanded after successful 0..5 mm commissioning tests.
-                "max_position_m": 0.015,
-                "max_velocity_m_s": 0.0005,
-                "max_acceleration_m_s2": 0.001,
-            }
-        ],
-        output="screen",
-    )
-
     state_publisher = Node(
         package="robot_state_publisher",
         executable="robot_state_publisher",
         parameters=[robot_description],
         output="screen",
     )
-
-    shutdown_on_control_exit = RegisterEventHandler(
+    shutdown_state_publisher = RegisterEventHandler(
         OnProcessExit(
             target_action=control_node,
             on_exit=[EmitEvent(event=Shutdown(reason="ros2_control_node exited"))],
@@ -81,9 +54,7 @@ def generate_launch_description() -> LaunchDescription:
         [
             control_node,
             state_broadcaster,
-            position_controller,
-            command_guard,
             state_publisher,
-            shutdown_on_control_exit,
+            shutdown_state_publisher,
         ]
     )

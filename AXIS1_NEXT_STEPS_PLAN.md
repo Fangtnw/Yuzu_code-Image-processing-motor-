@@ -33,11 +33,11 @@ preparing the Axis 2 and Axis 3 control-interface requirements.
 
 ## Task 1: Capture Feedback After Motion
 
-- [ ] Start the Axis 1 tiny-motion launch.
-- [ ] Send one small absolute command, such as `0.0001 m`.
-- [ ] Capture `/joint_states` after motion settles.
-- [ ] Record the final position in `progress.md`.
-- [ ] State clearly whether the value is measured feedback or only physical
+- [x] Start the Axis 1 tiny-motion launch.
+- [x] Send one small absolute command, such as `0.0001 m`.
+- [x] Capture `/joint_states` after motion settles.
+- [x] Record the final position in `progress.md`.
+- [x] State clearly whether the value is measured feedback or only physical
       observation.
 
 Useful commands:
@@ -54,13 +54,13 @@ ros2 topic echo /joint_states --once
 Run a small absolute-position sequence and compare physical direction with
 `/joint_states`.
 
-- [ ] Command `0.0001 m`.
-- [ ] Command `0.0005 m`.
-- [ ] Command `0.0010 m`.
-- [ ] Command back to `0.0001 m`.
-- [ ] Confirm direction is correct.
-- [ ] Confirm reported position changes in the expected direction.
-- [ ] Record any abnormal sound, alarm, delay, or overshoot.
+- [x] Command `0.0001 m`.
+- [x] Command `0.0005 m`.
+- [x] Command `0.0010 m`.
+- [x] Command back to `0.0001 m`.
+- [x] Confirm direction is correct.
+- [x] Confirm reported position changes in the expected direction.
+- [x] Record any abnormal sound, alarm, delay, or overshoot.
 
 Use only one command at a time:
 
@@ -71,11 +71,11 @@ ros2 topic pub --once /axis1_position_controller/commands \
 
 ## Task 3: Confirm Software Limits
 
-- [ ] Inspect the active Axis 1 xacro/config limits.
-- [ ] Confirm limits are inside the physical 30 mm stroke.
-- [ ] Keep the first working limit range conservative, for example `0 mm` to
+- [x] Inspect the active Axis 1 xacro/config limits.
+- [x] Confirm limits are inside the physical 30 mm stroke.
+- [x] Keep the first working limit range conservative, for example `0 mm` to
       `5 mm`.
-- [ ] Update the relevant config or `progress.md` if the active limits are not
+- [x] Update the relevant config or `progress.md` if the active limits are not
       obvious.
 
 Important: the drive-level software limits read from SDO are effectively the
@@ -86,10 +86,10 @@ ROS-side limits and operator discipline are required.
 
 If the video demo has already been recorded:
 
-- [ ] Add the result to `progress.md`.
-- [ ] Record the command or executable used.
+- [x] Add the result to `progress.md`.
+- [x] Record the command or executable used.
 - [ ] Record the observed start/end positions if `/joint_states` was captured.
-- [ ] Mention that the video proves visible Axis 1 motion, but measured
+- [x] Mention that the video proves visible Axis 1 motion, but measured
       convergence still depends on captured feedback.
 
 If the video demo has not been executed yet:
@@ -119,7 +119,7 @@ Current repo state:
 
 Requirement before all 3 axes can have ROS control interfaces:
 
-- [ ] Confirm Axis 2 and Axis 3 should be exposed as rotary joints:
+- [x] Confirm Axis 2 and Axis 3 should be exposed as rotary joints:
       `axis2_joint` and `axis3_joint`.
 - [ ] Do not map final machine motor numbers directly to current AZD3A axis
       numbers without verifying the actual wiring and connected model.
@@ -131,11 +131,11 @@ Requirement before all 3 axes can have ROS control interfaces:
 - [ ] Treat Axis 2/3 as rotary interfaces that may need velocity/rpm
       start-stop control first, with optional angle/position control only when
       the sequence needs indexing or orbit positioning.
-- [ ] Use the corrected Axis 2 / machine Motor 2 model:
+- [x] Use the corrected Axis 2 / machine Motor 2 model:
       `AZM46AK-FC7.2UA`, intended for about `200-250 rpm` spin/stop.
 - [ ] Keep `AZM46AK-FC20DA` scaling notes assigned to Axis 3 / machine Motor 5
       only, unless physical wiring proves otherwise.
-- [ ] Confirm Axis 2 PDO objects:
+- [x] Confirm Axis 2 PDO objects:
       Controlword `0x6840`, Target position `0x687A`, Mode command `0x6860`,
       Target velocity `0x68FF`, Statusword `0x6841`, Actual position `0x6864`,
       Mode display `0x6861`.
@@ -149,6 +149,8 @@ Requirement before all 3 axes can have ROS control interfaces:
       the `3183.098862 counts/rad` and `0.000314159265 rad/count` reference
       value only for Axis 3 / `AZM46AK-FC20DA`, assuming the drive resolution
       is `1000 P/R` with a `20:1` gearbox.
+      Axis 2 is now confirmed independently at 10,000 steps/output revolution
+      from live A=1/B=1 and the AZD3A manual formula; Axis 3 remains pending.
 - [ ] Confirm the velocity unit conversion before any rpm command. The AZD3A
       object name is Target velocity `[Hz]`; the operator-facing command may be
       rpm, but the EtherCAT PDO value must be converted to the drive's expected
@@ -163,7 +165,8 @@ Requirement before all 3 axes can have ROS control interfaces:
 
 Recommended staged implementation:
 
-1. Add Axis 2/3 to a feedback-only launch first.
+1. [Axis 2 complete; Axis 3 pending] Add Axis 2/3 to a feedback-only launch
+   first.
 2. Verify `/joint_states` includes:
 
    ```text
@@ -172,8 +175,10 @@ Recommended staged implementation:
    axis3_joint
    ```
 
-3. Confirm Axis 2/3 feedback changes only when the physical motors are moved or
-   commanded later.
+3. [Axis 2 stationary baseline complete] Confirm Axis 2/3 feedback changes only
+   when the physical motors are moved or commanded later. Axis 2 reported
+   5,641,556 steps = 3544.694176883084 rad and zero velocity, with no exported
+   command interface.
 4. Add Axis 2 tiny rotary-speed test after velocity scaling and rpm limits are
    confirmed.
 5. Add Axis 3 tiny rotary-speed or angle test only after its role is confirmed

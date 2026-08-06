@@ -1,0 +1,15 @@
+controller_manager:
+  ros__parameters:
+    update_rate: 200
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    # Hardware-facing controller; operator commands go through the guard.
+    axis2_raw_velocity_controller:
+      type: velocity_controllers/JointGroupVelocityController
+
+axis2_raw_velocity_controller:
+  ros__parameters:
+    joints:
+      - axis2_joint

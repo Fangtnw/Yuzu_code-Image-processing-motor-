@@ -40,6 +40,7 @@ Oriental Motor identifies `DR28T1A03-AZAKR` as:
 - right-side cable
 - no mounting plate, electromagnetic brake, or ball-screw cover
 - maximum speed 40 mm/s
+- maximum acceleration 0.2 m/s^2
 - maximum horizontal/vertical transported mass 4 kg
 - maximum thrust and holding force 40 N
 - repetitive positioning accuracy ±0.01 mm
@@ -96,10 +97,54 @@ Before Axis 1 motion:
 
 The corrected Axis 2 / machine Motor 2 model is `AZM46AK-FC7.2UA`. Its
 sequence role is rotational motion at about 200-250 rpm with spin/stop control.
-Do not reuse the `AZM46AK-FC20DA` 20:1 scaling for Axis 2. The gear ratio,
-resolution setting, electronic gear, velocity unit conversion, and safe rpm
-limit must be confirmed from the physical motor label, MEXE02, and live SDO
-settings before enabling motion.
+Official product data identifies it as a 7.2:1 right-angle FC geared motor with
+a permissible output-speed range of 0 to 416 r/min, 0.7 N m holding torque,
+25 arc-minute (0.42 degree) backlash, and no electromagnetic brake.
+
+The live Axis 2 reads on 2026-08-06 were electronic gear A=1 and B=1,
+mechanism setting=1, gear-ratio override=0, and rotation-direction setting=1.
+HM-60323-7E section 3-2 defines output-shaft resolution as
+`10,000 * B / A`, so the active EtherCAT conversion is:
+
+```text
+10,000 steps/output revolution
+0.0006283185307179586 rad/step
+1591.5494309189535 steps/rad
+```
+
+The catalog's 0.05 degree/pulse value is explicitly for its 1000 P/R setting;
+it is not substituted for the live EtherCAT electronic-gear calculation.
+Objects `0x6864` and `0x686C` are respectively actual position in steps and
+actual velocity in Hz (steps/s), so the same `2*pi/10,000` factor converts them
+to radians and radians/second. Vendor object `0x4067:02` independently reports
+Axis 2 actual output speed in r/min.
+
+The first ROS stage uses `GenericEcSlave`, Controlword=0, mode=0, no command
+interface, RxPDO `0x1610`, and TxPDO `0x1A11`. It is feedback-only and must not
+enable Axis 2. Do not reuse the `AZM46AK-FC20DA` 20:1 scaling for Axis 2.
+
+For guarded motion commissioning, operators publish RPM directly to
+`/axis2_velocity_controller/commands_rpm`. The guard checks the active RPM
+boundary, applies an RPM/s acceleration ramp and command watchdog, converts
+RPM to rad/s internally, and alone publishes to the private ros2_control topic
+`/axis2_raw_velocity_controller/commands`.
+
+## Axis 1 CSP startup from a retained position
+
+Axis 1 may be stopped at any valid guarded position; it does not need to return
+to zero before ROS exits. A startup at a retained 14.9993 mm exposed that the
+generic position controller can briefly emit zero before the guard receives
+feedback, causing AZD3A alarm `0xFF34`. The Axis 1 motion xacro therefore sets
+the CiA 402 plugin's `position_startup_tolerance` to `0.00001 m`. CSP output is
+held at measured position until the raw controller and feedback agree within
+0.01 mm, after which normal guarded commands are accepted.
+
+Because `/joint_states` may briefly contain zero before EtherCAT reaches OP,
+the Axis 1 guard does not latch only its first sample. Until the first accepted
+operator target, it continuously tracks measured feedback and publishes that
+value to the raw controller. Live validation succeeded from a retained
+approximately 15 mm position: startup remained fault-free and the subsequent
+guarded return command produced physical motion.
 
 ## Axis 3: rotary Motor 5
 
@@ -163,7 +208,9 @@ values are valid absolute multi-turn position counts, not fault codes.
 - DR28T1A03-AZAKR:
   <https://www.orientalmotor.co.jp/ja/products/detail?hinmei=DR28T1A03-AZAKR>
 - AZM46AK-FC7.2UA:
-  physical-label/user-corrected model; catalog link still to be recorded
+  <https://catalog.orientalmotor.com/item/az-series-42mm-absolute-stepper-motors/az-series-42mm-absolute-encoder-stepper-motors-dc/azm46ak-fc7-2ua>
+- AZ Series family catalog:
+  `vendor/oriental_motor/AZ_Family_Catalog_2018-2019.pdf`
 - AZM46AK-FC20DA:
   <https://catalog.orientalmotor.com/item/az-series-42mm-absolute-stepper-motors/az-series-42mm-absolute-encoder-stepper-motors-dc/azm46ak-fc20da>
 - Multi-axis EtherCAT manual:

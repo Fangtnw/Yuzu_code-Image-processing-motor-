@@ -25,6 +25,8 @@ setup(
             f"azd3a_basic_test           = {package_name}.azd3a_basic_test_node:main",
             f"azd3a_ethercat_check       = {package_name}.azd3a_ethercat_check:main",
             f"azd3a_axis1_video_demo     = {package_name}.azd3a_axis1_video_demo:main",
+            f"azd3a_axis1_command_guard  = {package_name}.azd3a_axis1_command_guard:main",
+            f"azd3a_axis2_velocity_guard = {package_name}.azd3a_axis2_velocity_guard:main",
         ],
     },
 )
