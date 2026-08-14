@@ -7,7 +7,7 @@
     <parent link="axis2_base"/>
     <child link="axis2_output"/>
     <axis xyz="0 0 1"/>
-    <!-- Official output maximum is 416 rpm; commissioning is capped at 25 rpm. -->
+    <!-- Official output maximum is 416 rpm; current machine requirement is <=250 rpm. -->
     <limit velocity="43.563418" effort="0.7"/>
   </joint>
 
@@ -20,10 +20,10 @@
     </hardware>
 
     <joint name="axis2_joint">
-      <!-- +/-2.617993878 rad/s = +/-25 rpm commissioning boundary. -->
+      <!-- +/-26.17993878 rad/s = +/-250 rpm machine requirement boundary. -->
       <command_interface name="velocity">
-        <param name="min">-2.6179938779914944</param>
-        <param name="max">2.6179938779914944</param>
+        <param name="min">-26.179938779914945</param>
+        <param name="max">26.179938779914945</param>
       </command_interface>
       <state_interface name="position"/>
       <state_interface name="velocity"/>

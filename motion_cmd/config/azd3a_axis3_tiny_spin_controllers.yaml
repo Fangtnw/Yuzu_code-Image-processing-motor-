@@ -1,0 +1,14 @@
+controller_manager:
+  ros__parameters:
+    update_rate: 200
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    axis3_raw_velocity_controller:
+      type: velocity_controllers/JointGroupVelocityController
+
+axis3_raw_velocity_controller:
+  ros__parameters:
+    joints:
+      - axis3_joint

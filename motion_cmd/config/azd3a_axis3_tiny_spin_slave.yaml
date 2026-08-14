@@ -1,0 +1,22 @@
+# AZD3A Axis 3 cyclic synchronous velocity commissioning configuration.
+# A=1/B=1 with FC20: 200,000 counts per machine-output revolution.
+vendor_id: 0x000002BE
+product_id: 0x000013AF
+assign_activate: 0x0300
+auto_fault_reset: false
+
+rpdo:
+  - index: 0x1622
+    channels:
+      - {index: 0x7040, sub_index: 0, type: uint16, default: 0}
+      # ROS rad/s -> AZD3A steps/s.
+      - {index: 0x70ff, sub_index: 0, type: int32, command_interface: velocity, factor: 31830.98861837907, default: 0}
+      - {index: 0x7060, sub_index: 0, type: int8, default: 9}
+
+tpdo:
+  - index: 0x1a21
+    channels:
+      - {index: 0x7041, sub_index: 0, type: uint16}
+      - {index: 0x7064, sub_index: 0, type: int32, state_interface: position, factor: 0.00003141592653589793}
+      - {index: 0x706c, sub_index: 0, type: int32, state_interface: velocity, factor: 0.00003141592653589793}
+      - {index: 0x7061, sub_index: 0, type: int8}

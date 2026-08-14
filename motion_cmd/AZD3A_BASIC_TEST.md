@@ -3,6 +3,9 @@
 Use this for the first ROS2 Humble bring-up on native Ubuntu 22.04 with one
 AZD3A-KED connected to the dedicated EtherCAT NIC.
 
+For the normal after-reboot command sequence and known alarm recovery, use
+`AZD3A_DAILY_STARTUP_TROUBLESHOOTING.md`.
+
 ## Safety Order
 
 1. Confirm the motor moves correctly in MEXE02.

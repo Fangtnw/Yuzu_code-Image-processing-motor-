@@ -59,7 +59,7 @@ class Azd3aEthercatConfigFileTests(unittest.TestCase):
         self.assertRegex(slave_text, r"tpdo:\s*\n\s*-\s*index:\s*0x1a11")
         for index in ("0x6841", "0x6864", "0x686c", "0x6861"):
             self.assertRegex(slave_text, rf"index:\s*{index}")
-        self.assertEqual(slave_text.count("factor: 0.0006283185307179586"), 2)
+        self.assertEqual(slave_text.count("factor: 0.00008726646259971647"), 2)
         self.assertIn("auto_fault_reset: false", slave_text)
         self.assertNotIn("command_interface:", slave_text)
         self.assertIn('name="axis2_joint" type="continuous"', xacro_text)
@@ -73,18 +73,23 @@ class Azd3aEthercatConfigFileTests(unittest.TestCase):
         slave = MOTION_CMD / "config" / "azd3a_axis2_tiny_spin_slave.yaml"
         xacro = MOTION_CMD / "urdf" / "azd3a_axis2_tiny_spin.urdf.xacro"
         guard = MOTION_CMD / "motor_controller" / "azd3a_axis2_velocity_guard.py"
+        launch = MOTION_CMD / "launch" / "azd3a_axis2_tiny_spin.launch.py"
         slave_text = slave.read_text(encoding="utf-8").lower()
         xacro_text = xacro.read_text(encoding="utf-8")
         guard_text = guard.read_text(encoding="utf-8")
+        launch_text = launch.read_text(encoding="utf-8")
 
         self.assertRegex(slave_text, r"rpdo:\s*\n\s*-\s*index:\s*0x1612")
         self.assertRegex(slave_text, r"tpdo:\s*\n\s*-\s*index:\s*0x1a11")
         self.assertIn("command_interface: velocity", slave_text)
-        self.assertIn("factor: 1591.5494309189535", slave_text)
+        self.assertIn("factor: 11459.155902616465", slave_text)
         self.assertIn("default: 0", slave_text)
         self.assertIn("mode_of_operation\">9", xacro_text)
         self.assertIn("cia402_object_index_offset\">0x0800", xacro_text)
-        self.assertIn("2.6179938779914944", xacro_text)
+        self.assertIn("26.179938779914945", xacro_text)
+        self.assertIn('DeclareLaunchArgument(\n                "max_rpm"', launch_text)
+        self.assertIn('default_value="25.0"', launch_text)
+        self.assertIn('LaunchConfiguration("max_rpm")', launch_text)
         for expected in (
             "HARD_MAX_RPM = 416.0",
             "COMMISSIONING_MAX_RPM = 25.0",
@@ -94,6 +99,62 @@ class Azd3aEthercatConfigFileTests(unittest.TestCase):
             'RAW_TOPIC = "/axis2_raw_velocity_controller/commands"',
         ):
             self.assertIn(expected, guard_text)
+
+    def test_axis3_feedback_is_read_only_and_uses_reference_output_scaling(self):
+        slave = MOTION_CMD / "config" / "azd3a_axis3_feedback_slave.yaml"
+        xacro = MOTION_CMD / "urdf" / "azd3a_axis3_feedback.urdf.xacro"
+        launch = MOTION_CMD / "launch" / "azd3a_axis3_feedback.launch.py"
+        slave_text = slave.read_text(encoding="utf-8").lower()
+        xacro_text = xacro.read_text(encoding="utf-8")
+        launch_text = launch.read_text(encoding="utf-8")
+
+        self.assertRegex(slave_text, r"rpdo:\s*\n\s*-\s*index:\s*0x1620")
+        self.assertRegex(slave_text, r"tpdo:\s*\n\s*-\s*index:\s*0x1a21")
+        for index in ("0x7041", "0x7064", "0x706c", "0x7061"):
+            self.assertRegex(slave_text, rf"index:\s*{index}")
+        self.assertEqual(slave_text.count("factor: 0.00003141592653589793"), 2)
+        self.assertIn("auto_fault_reset: false", slave_text)
+        self.assertNotIn("command_interface:", slave_text)
+        self.assertIn('name="axis3_joint" type="continuous"', xacro_text)
+        self.assertNotIn("<command_interface", xacro_text)
+        self.assertIn("GenericEcSlave", xacro_text)
+        self.assertIn("joint_state_broadcaster", launch_text)
+
+    def test_axis3_spin_has_requirement_cap_ramp_and_watchdog(self):
+        slave_text = (MOTION_CMD / "config" / "azd3a_axis3_tiny_spin_slave.yaml").read_text(encoding="utf-8").lower()
+        xacro_text = (MOTION_CMD / "urdf" / "azd3a_axis3_tiny_spin.urdf.xacro").read_text(encoding="utf-8")
+        guard_text = (MOTION_CMD / "motor_controller" / "azd3a_axis3_velocity_guard.py").read_text(encoding="utf-8")
+
+        self.assertRegex(slave_text, r"rpdo:\s*\n\s*-\s*index:\s*0x1622")
+        self.assertRegex(slave_text, r"tpdo:\s*\n\s*-\s*index:\s*0x1a21")
+        self.assertIn("factor: 31830.98861837907", slave_text)
+        self.assertIn("mode_of_operation\">9", xacro_text)
+        self.assertIn("cia402_object_index_offset\">0x1000", xacro_text)
+        self.assertIn("2.0943951023931953", xacro_text)
+        for expected in (
+            "HARD_MAX_RPM = 150.0",
+            "COMMISSIONING_MAX_RPM = 5.0",
+            "DEFAULT_ACCELERATION_RPM_S = 2.0",
+            'PUBLIC_TOPIC = "/axis3_velocity_controller/commands_rpm"',
+            'RAW_TOPIC = "/axis3_raw_velocity_controller/commands"',
+        ):
+            self.assertIn(expected, guard_text)
+
+    def test_axis3_index_is_csp_feedback_synchronized_and_bounded(self):
+        slave_text = (MOTION_CMD / "config" / "azd3a_axis3_index_slave.yaml").read_text(encoding="utf-8").lower()
+        xacro_text = (MOTION_CMD / "urdf" / "azd3a_axis3_index.urdf.xacro").read_text(encoding="utf-8")
+        guard_text = (MOTION_CMD / "motor_controller" / "azd3a_axis3_index_guard.py").read_text(encoding="utf-8")
+        self.assertRegex(slave_text, r"rpdo:\s*\n\s*-\s*index:\s*0x1620")
+        self.assertRegex(slave_text, r"tpdo:\s*\n\s*-\s*index:\s*0x1a21")
+        self.assertIn("command_interface: position", slave_text)
+        self.assertIn("default: .nan", slave_text)
+        self.assertIn("cia402_object_index_offset\">0x1000", xacro_text)
+        self.assertIn("position_startup_tolerance\">0.000032", xacro_text)
+        self.assertIn("mode_of_operation\">8", xacro_text)
+        self.assertIn('PUBLIC_TOPIC = "/axis3_position_controller/commands_deg"', guard_text)
+        self.assertIn("0.0 <= offset_deg <= 90.0", guard_text)
+        self.assertIn("self.origin + math.radians(offset_deg)", guard_text)
+        self.assertIn("HARD_MAX_ACCELERATION_RPM_S = 60.0", guard_text)
 
     def test_python_check_controller_checks_igh_surfaces_only(self):
         script = MOTION_CMD / "motor_controller" / "azd3a_ethercat_check.py"

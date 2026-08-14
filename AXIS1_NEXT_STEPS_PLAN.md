@@ -146,19 +146,18 @@ Requirement before all 3 axes can have ROS control interfaces:
 - [ ] Confirm Axis 2/3 rotary scaling from live MEXE02/SDO settings before
       enabling motion. Axis 2 uses `AZM46AK-FC7.2UA`, so do not copy the
       `FC20DA` 20:1 reference scaling onto it. The current hardware note gives
-      the `3183.098862 counts/rad` and `0.000314159265 rad/count` reference
-      value only for Axis 3 / `AZM46AK-FC20DA`, assuming the drive resolution
-      is `1000 P/R` with a `20:1` gearbox.
-      Axis 2 is now confirmed independently at 10,000 steps/output revolution
-      from live A=1/B=1 and the AZD3A manual formula; Axis 3 remains pending.
+      Axis 3 uses `31830.988618 counts/output rad` and
+      `0.0000314159265 output rad/count`: live A=1/B=1 gives 10,000 counts per
+      motor revolution and FC20 gives 200,000 per machine-output revolution.
+      Axis 2 similarly uses 72,000 counts/output revolution after FC7.2.
 - [ ] Confirm the velocity unit conversion before any rpm command. The AZD3A
       object name is Target velocity `[Hz]`; the operator-facing command may be
       rpm, but the EtherCAT PDO value must be converted to the drive's expected
       unit for the selected mode.
-- [ ] Map the current sequence intent before choosing controllers:
-      Motor 2 is spin/stop at about `200-250 rpm`; Motor 5 is rotational motion
-      around `20 rpm`; linear/feed axes remain position plus speed style
-      commands.
+- [x] Map the current sequence intent before choosing controllers:
+      Motor 2 is spin/stop at about `200-250 rpm`; Motor 5 (Axis 3) must move
+      90 degrees CW and then 90 degrees CCW back to its captured start at up to
+      `20 rpm`; linear/feed axes remain position plus speed style commands.
 - [ ] Decide whether the next implementation should use one combined
       three-axis URDF/config or separate staged files:
       `axis2_feedback`, `axis2_tiny_move`, `axis3_feedback`, `axis3_tiny_move`.

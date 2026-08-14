@@ -10,6 +10,12 @@ same thing as the final machine motor numbering. Axis 1 currently uses a
 model is the machine Motor 3/4 type in the mechanism plan, but it is wired to
 AZD3A Axis 1 right now.
 
+The final machine has six logical motors and is expected to use two
+three-axis AZD3A-KED controllers. Software must therefore identify a joint by
+its machine role first and resolve the EtherCAT slave and local drive axis from
+configuration. Do not encode assumptions such as `axis3 == Motor 5` into the
+final sequence controller.
+
 ## EtherCAT drive
 
 | Item | Value |
@@ -27,7 +33,45 @@ AZD3A Axis 1 right now.
 | --- | --- | --- | --- |
 | Axis 1 | `DR28T1A03-AZAKR` | Linear, machine Motor 3/4 type currently wired to Axis 1 | Confirmed in Oriental Motor catalog |
 | Axis 2 | `AZM46AK-FC7.2UA` | Rotary speed / spin-stop, machine Motor 2 | User-corrected physical model; verify scaling before motion |
-| Axis 3 | `AZM46AK-FC20DA` | Rotary speed / optional angle, machine Motor 5 | Confirmed in Oriental Motor catalog |
+| Axis 3 | `AZM46AK-FC20DA` | Indexed rotary position, machine Motor 5: +90 degrees CW then -90 degrees CCW at up to 20 rpm | Confirmed model; sequence clarified by operator |
+
+These are temporary bring-up ports on the currently available AZD3A-KED:
+
+| Current local port | Temporary connected machine role |
+| --- | --- |
+| AZD3A slave 0, Axis 1 | Motor 3/4 actuator type (one `DR28T1A03-AZAKR`) |
+| AZD3A slave 0, Axis 2 | Motor 2 (`AZM46AK-FC7.2UA`) |
+| AZD3A slave 0, Axis 3 | Motor 5 (`AZM46AK-FC20DA`) |
+
+This table is commissioning evidence, not the final harness assignment. When
+the remaining motors and second AZD3A-KED arrive, record an explicit mapping
+for each logical `motor_1` through `motor_6` to `{slave alias, local axis}`.
+Prefer persistent EtherCAT aliases over chain position if the installation
+allows it, because physical slave position can change when cabling changes.
+
+## Machine sequence sources
+
+- `sequence.png` shows the mechanical locations and logical Motor 1-6 roles.
+- `YuzuSequence.pdf` contains the two-page peeling-operation sequence.
+- SHA-256 `sequence.png`:
+  `fe20d4c952a1d24efae66022b6038ab28eeffe6b267f091a7db9050905e603b4`
+- SHA-256 `YuzuSequence.pdf`:
+  `05f40630545ee87e0b9fa3f5fe832f7ff54d79560de0b1faa498347749dd29ec`
+
+The PDF specifies:
+
+| Logical motor | Machine role / sequence action |
+| --- | --- |
+| Motor 1 | Yuzu holding set; approach for placement, later HOME |
+| Motor 2 | Yuzu rotation, 200-250 rpm; CCW during rotation/feed |
+| Motors 3 and 4 | Peeling-depth feed; FD for grip/feed and HOME for release |
+| Motor 5 | Peeler positioning `90° ROT`, then CW rotation at 20 rpm |
+| Motor 6 | Conveyor feed / yuzu positioning FD |
+
+The PDF does not explicitly draw Motor 5's 90-degree CCW return. The operator
+has separately confirmed that the required indexed action is 90 degrees CW and
+then 90 degrees CCW back to the captured starting position. Treat that return
+as an additional confirmed requirement pending a revised sequence drawing.
 
 ## Axis 1: linear actuator
 
@@ -103,21 +147,22 @@ a permissible output-speed range of 0 to 416 r/min, 0.7 N m holding torque,
 
 The live Axis 2 reads on 2026-08-06 were electronic gear A=1 and B=1,
 mechanism setting=1, gear-ratio override=0, and rotation-direction setting=1.
-HM-60323-7E section 3-2 defines output-shaft resolution as
-`10,000 * B / A`, so the active EtherCAT conversion is:
+HM-60323-7E section 3-2 defines **motor output shaft** resolution as
+`10,000 * B / A`. Applying the FC7.2 gearhead gives:
 
 ```text
-10,000 steps/output revolution
-0.0006283185307179586 rad/step
-1591.5494309189535 steps/rad
+72,000 counts/machine-output revolution
+0.00008726646259971647 output rad/count
+11459.155902616465 counts/output rad
 ```
 
 The catalog's 0.05 degree/pulse value is explicitly for its 1000 P/R setting;
 it is not substituted for the live EtherCAT electronic-gear calculation.
 Objects `0x6864` and `0x686C` are respectively actual position in steps and
-actual velocity in Hz (steps/s), so the same `2*pi/10,000` factor converts them
-to radians and radians/second. Vendor object `0x4067:02` independently reports
-Axis 2 actual output speed in r/min.
+actual velocity in Hz (motor counts/s), so the gearbox must be included when
+converting them to machine-output radians and radians/second. Vendor object
+`0x4067:02` reports feedback speed in r/min and should be used in the repeat
+physical validation.
 
 The first ROS stage uses `GenericEcSlave`, Controlword=0, mode=0, no command
 interface, RxPDO `0x1610`, and TxPDO `0x1A11`. It is feedback-only and must not
@@ -128,6 +173,12 @@ For guarded motion commissioning, operators publish RPM directly to
 boundary, applies an RPM/s acceleration ramp and command watchdog, converts
 RPM to rad/s internally, and alone publishes to the private ros2_control topic
 `/axis2_raw_velocity_controller/commands`.
+
+Corrected live commissioning passed at 25, 100, 200, and 250 machine-output
+rpm. The present hardware also passed an experimental 250 output-rpm/s ramp,
+reaching 250 rpm in about one second. This acceleration is load-dependent and
+is not an Oriental Motor rated maximum; repeat the test after installation of
+the final driven load before adopting it as a production setting.
 
 ## Axis 1 CSP startup from a retained position
 
@@ -159,18 +210,31 @@ Oriental Motor identifies `AZM46AK-FC20DA` as:
 - nominal resolution 0.018 degrees/pulse when the resolution setting is
   1000 P/R
 
-At that stated setting, the Axis 3 output-shaft conversion is:
+The live A=1/B=1 setting is 10,000 counts per motor revolution. Applying the
+FC20 gearhead gives the machine-output conversion:
 
 ```text
-20,000 counts/output revolution
-0.000314159265 rad/count
-3183.098862 counts/rad
+200,000 counts/machine-output revolution
+0.00003141592653589793 output rad/count
+31830.98861837907 counts/output rad
 ```
 
-These values are reference calculations for Axis 3 only, not yet active
-configuration. MEXE02/SDO settings must confirm that the actual electronic
-gear and resolution match the catalog condition before they are used as ROS
-scaling factors.
+The required machine
+sequence is a relative 90-degree clockwise move followed by a 90-degree
+counterclockwise return to the captured starting position, at no more than
+20 rpm. At 200,000 counts per output revolution, 90 degrees equals 50,000
+counts. The physically verified positive ROS direction is clockwise when
+viewed from the output-shaft front.
+
+Live corrected-scaling validation moved from `-57.165142491030196` to
+`-55.5943461642353` output rad: exactly pi/2 rad. The physical output mark also
+moved one quarter-turn CW. Thus the 200,000-count/output-revolution conversion
+is verified for position indexing.
+
+Using the same corrected conversion, staged 5 and 10 output-rpm tests and the
+final 20 output-rpm CW test completed successfully. This validates both Motor
+5 actions shown in the sequence PDF: 90-degree positioning and subsequent
+20 rpm clockwise rotation.
 
 ## Axis-specific CiA 402 objects
 

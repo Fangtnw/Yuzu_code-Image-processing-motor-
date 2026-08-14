@@ -39,7 +39,7 @@ captured feedback evidence before adding Axis 2 or Axis 3 motion.
 | --- | --- | --- |
 | Axis 1 | `DR28T1A03-AZAKR` | Machine Motor 3/4 actuator type, currently wired to Axis 1 for bring-up; 1 mm-lead, 30 mm-stroke linear actuator |
 | Axis 2 | `AZM46AK-FC7.2UA` | Machine Motor 2 rotary axis; 200-250 rpm spin/stop target role |
-| Axis 3 | `AZM46AK-FC20DA` | Machine Motor 5 rotary axis; 20 rpm rotational target role |
+| Axis 3 | `AZM46AK-FC20DA` | Machine Motor 5 indexed rotary axis; rotate 90 degrees CW and return 90 degrees CCW at up to 20 rpm |
 
 The `DR28T1A03-AZAKR` is not throwaway hardware; it is the machine Motor 3/4
 actuator type from the mechanism plan. For the current one-drive bring-up, one
@@ -554,6 +554,29 @@ in standard ROS rad/s; conversion is performed only inside the guard. This
 makes an operator command such as `{data: [25.0]}` unambiguous while preserving
 the standard ros2_control interface internally.
 
+The operator later confirmed that the guarded 25 rpm physical test was
+completed successfully. The final machine requirement remains 200-250 rpm;
+25 rpm was a staged commissioning milestone rather than the final operating
+speed. Further increases should remain staged and revalidate automatic stop,
+feedback, vibration/noise, and the Axis 2 alarm after each level.
+
+For the 200-250 rpm requirement, the Axis 2 launch now accepts explicit
+`max_rpm`, `max_acceleration_rpm_s`, and `command_timeout_s` arguments. The
+default ceiling remains the physically verified 25 rpm. The ros2_control raw
+velocity boundary is 250 rpm (26.1799387799 rad/s), while the runtime guard
+enforces the ceiling selected for each launch. The planned sequence is 100 rpm
+as an intermediate check, followed by separate 200 rpm and 250 rpm runs, using
+a conservative 25 rpm/s ramp and alarm/feedback validation after each run.
+
+On 2026-08-14, the staged Axis 2 validation was completed successfully. The
+operator physically confirmed smooth motion at 100 rpm, followed by 200 rpm
+and the final 250 rpm requirement. After each timed command, the watchdog and
+25 rpm/s guard ramp returned reported velocity to `0.0`; after the 200 rpm run,
+Axis 2 error object `0x683F` read `0x0000`. The operator reported that the
+250 rpm run also completed normally. Axis 2 guarded velocity control is
+therefore verified across the required 200-250 rpm range in the tested
+clockwise direction.
+
 ### Axis 1 retained-position startup fault and interlock (2026-08-06)
 
 After the earlier recording, Axis 1 was stopped with `Ctrl+C` while physically
@@ -599,3 +622,132 @@ position, reached Operation Enabled without `0xFF34`, and physically moved
 under the guarded return command. This live result validates startup from a
 non-origin retained position; returning to zero before shutdown is not
 required.
+
+### Axis 3 feedback and 5 rpm commissioning (2026-08-14)
+
+Axis 3 is the `AZM46AK-FC20DA` 20:1 geared rotary Motor 5. Its machine
+requirement is approximately 20 rpm and its official permissible output speed
+is 150 rpm. Live read-only state showed error `0x0000`, statusword `0x0270`,
+mode 0, position -1,970,446 counts, zero velocity, electronic gear A=1/B=1,
+and supported modes `0x1A5`.
+
+The feedback-only ROS launch mapped Axis 3 RxPDO `0x1620` and TxPDO `0x1A21`
+without a command interface. `/joint_states` reported -619.0338677895394 rad,
+exactly matching the -1,970,446 raw counts at the 20,000-count/output-revolution
+reference scaling, and velocity remained `0.0`.
+
+A guarded CSV launch then used RxPDO `0x1622`, the Axis 3 CiA 402 object offset
+`0x1000`, a 5 rpm ceiling, 2 rpm/s ramp, and 0.5-second watchdog. Physical
+rotation was confirmed, provisionally clockwise viewed from the output-shaft
+front. Stopping EtherCAT too soon initially produced `0xFF81`, which the vendor
+manual identifies as Network bus error because the EtherCAT state left OP
+during operation. After resetting Axis 3 and repeating while waiting for the
+watchdog ramp to reach zero before `Ctrl+C`, the final alarm was `0x0000`.
+
+The staged velocity test then passed at 10 rpm and at the final required
+20 rpm. Axis 3 accelerated at 5 rpm/s, rotated smoothly with normal reported
+behavior, returned to zero velocity through the watchdog ramp, and remained
+alarm-free after communication was stopped only once physical and reported
+velocity were zero. Axis 3 guarded velocity control is therefore verified at
+its 20 rpm machine requirement in the tested positive/clockwise direction.
+
+The operator then clarified the sequence requirement: Axis 3 is not merely a
+continuous 20 rpm spin/stop axis. From its captured starting position it must
+rotate 90 degrees clockwise and then rotate 90 degrees counterclockwise back to
+that same starting position. With the verified 20,000-count/output-revolution
+scaling, each 90-degree leg is exactly 5,000 counts or pi/2 radians. Positive
+velocity was physically observed as clockwise, so the intended relative ROS
+targets are `start + pi/2`, followed by `start`. Timed velocity commands are
+not sufficient for this sequence because they cannot guarantee the final
+angle; the next implementation must use guarded position trajectory generation
+with a 20 rpm speed ceiling and feedback-verified completion of each leg.
+
+#### Geared-output scaling correction (2026-08-14)
+
+The first 90-degree CSP test changed feedback by the intended pi/2 radians but
+produced only about 9 degrees of visible machine-output motion. This falsified
+the earlier 20,000-count/output-revolution assumption. HM-60323-7E section 3-2
+states that `10,000 * B/A` is resolution per revolution of the **motor output
+shaft**. The external FC gear ratio must also be applied:
+
+```text
+Axis 2 FC7.2: 10,000 * 7.2 = 72,000 counts/machine-output revolution
+Axis 3 FC20:  10,000 * 20  = 200,000 counts/machine-output revolution
+Axis 3 90 degrees = 50,000 counts
+```
+
+Axis 3's observed 5,000-count move becoming about 9 output degrees matches the
+FC20 calculation exactly. The corrected Axis 3 state factor is
+`0.00003141592653589793 output rad/count`, and its command factor is
+`31830.98861837907 counts/output rad`. The corresponding Axis 2 factors are
+`0.00008726646259971647 output rad/count` and
+`11459.155902616465 counts/output rad`.
+
+This correction invalidates the claimed machine-output speeds from the earlier
+Axis 2 and Axis 3 velocity milestones: those tests verified smooth motor-side
+motion, direction, watchdog stopping, and alarm-free operation, but not the
+required geared-output rpm. Axis 2 must be recommissioned toward 200-250 output
+rpm and Axis 3 toward 20 output rpm using the corrected factors. No further
+motion is permitted with the superseded scaling.
+
+Axis 2 was subsequently recommissioned with the corrected FC7.2 conversion.
+True machine-output tests passed at 25, 100, 200, and 250 rpm with smooth CW
+rotation, controlled watchdog stopping, zero final velocity, and normal drive
+state. The operator then increased output acceleration in stages and confirmed
+that 100 rpm/s and finally 250 rpm/s worked on the present commissioning
+hardware; 250 rpm/s reaches 250 rpm in approximately one second. This is an
+empirical unloaded/current-mechanism result, not a manufacturer acceleration
+rating. It must be revalidated against torque margin, load inertia, vibration,
+and stopping behavior when the final Yuzu holding mechanism/load is installed.
+
+Axis 2 now satisfies its corrected 200-250 machine-output rpm commissioning
+requirement. The official `AZM46AK-FC7.2UA` permissible output-speed range is
+0-416 rpm, so the required speed is within the product envelope.
+
+After rebuilding with the FC20 correction, Axis 3 was relaunched with a 1 rpm
+machine-output ceiling and commanded to the PDF's 90-degree CW positioning
+target. Feedback changed from `-57.165142491030196` to
+`-55.5943461642353 rad`, an exact `+1.570796326794896 rad` (90 degrees), while
+the operator physically confirmed a quarter-turn at the output. Final velocity
+was `0.0`. This validates 200,000 counts per FC20 machine-output revolution and
+completes the Motor 5 peeler-positioning milestone. The separate PDF phase of
+CW rotation at 20 output rpm remains pending corrected-speed commissioning.
+
+Corrected-speed commissioning then passed at 5 and 10 machine-output rpm,
+followed by the final 20 output rpm requirement. With the FC20 conversion,
+full-speed feedback corresponds to approximately `2.0944 rad/s`. The operator
+confirmed smooth clockwise rotation, controlled watchdog deceleration, zero
+final velocity, and normal drive state. These separate tests validate the
+corrected position and velocity scaling, but they do not yet validate an exact
+90-degree index whose trajectory reaches 20 rpm. That combined test remains
+pending. No automatic CCW return is included in the current PDF-following
+behavior.
+
+The source sequence artifacts were then added as `motion_cmd/sequence.png` and
+`motion_cmd/YuzuSequence.pdf`. Review confirmed the final machine has six
+logical motors, while the currently available AZD3A-KED exposes only three
+local axes and is wired in a temporary commissioning order: local Axis 1 uses
+a Motor 3/4 actuator type, local Axis 2 is machine Motor 2, and local Axis 3 is
+machine Motor 5. A second three-axis AZD3A-KED will be added when the remaining
+motors arrive. Final software must therefore keep logical machine motor IDs
+separate from `{EtherCAT slave, local axis}` and load the wiring map from
+configuration instead of renaming machine motors to match today's ports.
+
+The PDF explicitly shows Motor 5 `90° ROT` during peeler positioning and later
+CW rotation during rotation/feed. It does not explicitly show a 90-degree CCW
+return; that return is recorded as a separate operator-confirmed requirement
+until the source sequence drawing is revised.
+
+## Daily startup reference
+
+The single after-reboot and troubleshooting reference is now:
+
+```text
+motion_cmd/AZD3A_DAILY_STARTUP_TROUBLESHOOTING.md
+```
+
+It records the required EtherCAT master restart, `/dev/EtherCAT0` permissions,
+NIC/slave checks, ROS environment sourcing, axis-specific alarm/status/position
+reads, alarm reset sequence, known `0xFF34` diagnosis, and common recovery
+commands. The EtherCAT master must be started after Ubuntu boots before any ROS
+motor launch.

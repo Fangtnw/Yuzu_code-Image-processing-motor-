@@ -1,4 +1,4 @@
-"""Guard and ramp Axis 2 commissioning velocity commands."""
+"""Guard and ramp Axis 3 commissioning velocity commands."""
 
 import math
 
@@ -7,18 +7,18 @@ from rclpy.node import Node
 from std_msgs.msg import Float64MultiArray
 
 
-PUBLIC_TOPIC = "/axis2_velocity_controller/commands_rpm"
-RAW_TOPIC = "/axis2_raw_velocity_controller/commands"
-HARD_MAX_RPM = 416.0
-COMMISSIONING_MAX_RPM = 25.0
-DEFAULT_ACCELERATION_RPM_S = 10.0
+PUBLIC_TOPIC = "/axis3_velocity_controller/commands_rpm"
+RAW_TOPIC = "/axis3_raw_velocity_controller/commands"
+HARD_MAX_RPM = 150.0
+COMMISSIONING_MAX_RPM = 5.0
+DEFAULT_ACCELERATION_RPM_S = 2.0
 COMMAND_TIMEOUT_S = 0.5
 UPDATE_PERIOD_S = 0.005
 
 
-class Axis2VelocityGuard(Node):
+class Axis3VelocityGuard(Node):
     def __init__(self) -> None:
-        super().__init__("azd3a_axis2_velocity_guard")
+        super().__init__("azd3a_axis3_velocity_guard")
         self.declare_parameter("max_rpm", COMMISSIONING_MAX_RPM)
         self.declare_parameter("max_acceleration_rpm_s", DEFAULT_ACCELERATION_RPM_S)
         self.declare_parameter("command_timeout_s", COMMAND_TIMEOUT_S)
@@ -44,7 +44,7 @@ class Axis2VelocityGuard(Node):
         )
         self.timer = self.create_timer(UPDATE_PERIOD_S, self.update)
         self.get_logger().info(
-            f"Axis 2 guard ready: +/-{self.max_rpm:.1f} rpm, "
+            f"Axis 3 guard ready: +/-{self.max_rpm:.1f} rpm, "
             f"{self.max_acceleration_rpm_s:.1f} rpm/s ramp, "
             f"{self.command_timeout_s:.1f} s watchdog"
         )
@@ -81,7 +81,7 @@ class Axis2VelocityGuard(Node):
 
 def main() -> None:
     rclpy.init()
-    node = Axis2VelocityGuard()
+    node = Axis3VelocityGuard()
     try:
         rclpy.spin(node)
     finally:

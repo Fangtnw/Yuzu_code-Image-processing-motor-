@@ -1,4 +1,4 @@
-"""Launch guarded commissioning control for AZD3A Axis 2."""
+"""Launch guarded commissioning control for AZD3A Axis 3."""
 
 from pathlib import Path
 
@@ -20,7 +20,7 @@ def generate_launch_description() -> LaunchDescription:
     robot_description = {
         "robot_description": ParameterValue(
             Command(
-                ["xacro ", str(package_share / "urdf" / "azd3a_axis2_tiny_spin.urdf.xacro")]
+                ["xacro ", str(package_share / "urdf" / "azd3a_axis3_tiny_spin.urdf.xacro")]
             ),
             value_type=str,
         )
@@ -30,7 +30,7 @@ def generate_launch_description() -> LaunchDescription:
         executable="ros2_control_node",
         parameters=[
             robot_description,
-            str(package_share / "config" / "azd3a_axis2_tiny_spin_controllers.yaml"),
+            str(package_share / "config" / "azd3a_axis3_tiny_spin_controllers.yaml"),
         ],
         output="screen",
     )
@@ -43,21 +43,19 @@ def generate_launch_description() -> LaunchDescription:
     velocity_controller = Node(
         package="controller_manager",
         executable="spawner",
-        arguments=["axis2_raw_velocity_controller", "-c", "/controller_manager"],
+        arguments=["axis3_raw_velocity_controller", "-c", "/controller_manager"],
         output="screen",
     )
     command_guard = Node(
         package="motor_controller",
-        executable="azd3a_axis2_velocity_guard",
+        executable="azd3a_axis3_velocity_guard",
         parameters=[
             {
                 "max_rpm": ParameterValue(max_rpm, value_type=float),
                 "max_acceleration_rpm_s": ParameterValue(
                     max_acceleration_rpm_s, value_type=float
                 ),
-                "command_timeout_s": ParameterValue(
-                    command_timeout_s, value_type=float
-                ),
+                "command_timeout_s": ParameterValue(command_timeout_s, value_type=float),
             }
         ],
         output="screen",
@@ -78,13 +76,13 @@ def generate_launch_description() -> LaunchDescription:
         [
             DeclareLaunchArgument(
                 "max_rpm",
-                default_value="25.0",
-                description="Guarded absolute Axis 2 speed ceiling in rpm",
+                default_value="5.0",
+                description="Guarded absolute Axis 3 speed ceiling in rpm",
             ),
             DeclareLaunchArgument(
                 "max_acceleration_rpm_s",
-                default_value="10.0",
-                description="Axis 2 command ramp in rpm/s",
+                default_value="2.0",
+                description="Axis 3 command ramp in rpm/s",
             ),
             DeclareLaunchArgument(
                 "command_timeout_s",

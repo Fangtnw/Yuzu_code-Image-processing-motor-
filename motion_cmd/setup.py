@@ -27,6 +27,8 @@ setup(
             f"azd3a_axis1_video_demo     = {package_name}.azd3a_axis1_video_demo:main",
             f"azd3a_axis1_command_guard  = {package_name}.azd3a_axis1_command_guard:main",
             f"azd3a_axis2_velocity_guard = {package_name}.azd3a_axis2_velocity_guard:main",
+            f"azd3a_axis3_velocity_guard = {package_name}.azd3a_axis3_velocity_guard:main",
+            f"azd3a_axis3_index_guard    = {package_name}.azd3a_axis3_index_guard:main",
         ],
     },
 )

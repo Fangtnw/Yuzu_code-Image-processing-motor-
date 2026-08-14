@@ -1,0 +1,20 @@
+# Axis 3 CSP indexing: AZM46AK-FC20DA, 200,000 counts/output revolution.
+vendor_id: 0x000002BE
+product_id: 0x000013AF
+assign_activate: 0x0300
+auto_fault_reset: false
+
+rpdo:
+  - index: 0x1620
+    channels:
+      - {index: 0x7040, sub_index: 0, type: uint16, default: 0}
+      - {index: 0x707a, sub_index: 0, type: int32, command_interface: position, factor: 31830.98861837907, default: .nan}
+      - {index: 0x7060, sub_index: 0, type: int8, default: 8}
+
+tpdo:
+  - index: 0x1a21
+    channels:
+      - {index: 0x7041, sub_index: 0, type: uint16}
+      - {index: 0x7064, sub_index: 0, type: int32, state_interface: position, factor: 0.00003141592653589793}
+      - {index: 0x706c, sub_index: 0, type: int32, state_interface: velocity, factor: 0.00003141592653589793}
+      - {index: 0x7061, sub_index: 0, type: int8}
