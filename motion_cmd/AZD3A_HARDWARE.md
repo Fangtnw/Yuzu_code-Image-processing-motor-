@@ -4,11 +4,10 @@ This records the physical devices connected during the one-drive bring-up.
 Model strings should be checked against the physical labels before scaling or
 motion limits are treated as final.
 
-Axis numbering here follows the current AZD3A bring-up wiring. It is not the
-same thing as the final machine motor numbering. Axis 1 currently uses a
-`DR28T1A03-AZAKR` linear actuator for EtherCAT/ROS 2 validation. That actuator
-model is the machine Motor 3/4 type in the mechanism plan, but it is wired to
-AZD3A Axis 1 right now.
+Axis numbering here follows the current AZD3A wiring. As of 2026-09-21, the
+drive has been rewired to follow the requirement sequence: logical Motor 1 is
+on Axis 1 and logical Motor 2 is on Axis 2. Axis 3 is disconnected. The old
+Axis 1 `DR28T1A03-AZAKR` commissioning setup is no longer connected.
 
 The final machine has six logical motors and is expected to use two
 three-axis AZD3A-KED controllers. Software must therefore identify a joint by
@@ -31,23 +30,121 @@ final sequence controller.
 
 | AZD3A axis | Connected device | Motion type | Verification |
 | --- | --- | --- | --- |
-| Axis 1 | `DR28T1A03-AZAKR` | Linear, machine Motor 3/4 type currently wired to Axis 1 | Confirmed in Oriental Motor catalog |
+| Axis 1 | `AZM46AK`, parameterized for `EZSM3LD040AZAK` | Linear slide, machine Motor 1 | Label photo and live A=1/B=1 values confirmed |
 | Axis 2 | `AZM46AK-FC7.2UA` | Rotary speed / spin-stop, machine Motor 2 | User-corrected physical model; verify scaling before motion |
-| Axis 3 | `AZM46AK-FC20DA` | Indexed rotary position, machine Motor 5: +90 degrees CW then -90 degrees CCW at up to 20 rpm | Confirmed model; sequence clarified by operator |
+| Axis 3 | Disconnected | No current motor | Previous Motor 5 commissioning wiring removed |
 
 These are temporary bring-up ports on the currently available AZD3A-KED:
 
 | Current local port | Temporary connected machine role |
 | --- | --- |
-| AZD3A slave 0, Axis 1 | Motor 3/4 actuator type (one `DR28T1A03-AZAKR`) |
+| AZD3A slave 0, Axis 1 | Motor 1 (`AZM46AK` / `EZSM3LD040AZAK`) |
 | AZD3A slave 0, Axis 2 | Motor 2 (`AZM46AK-FC7.2UA`) |
-| AZD3A slave 0, Axis 3 | Motor 5 (`AZM46AK-FC20DA`) |
+| AZD3A slave 0, Axis 3 | Disconnected |
 
 This table is commissioning evidence, not the final harness assignment. When
 the remaining motors and second AZD3A-KED arrive, record an explicit mapping
 for each logical `motor_1` through `motor_6` to `{slave alias, local axis}`.
 Prefer persistent EtherCAT aliases over chain position if the installation
 allows it, because physical slave position can change when cabling changes.
+
+Motor 4 commissioning now uses AZD3A slave 1, local Axis 1 (CN7). Its confirmed
+`DR28T1A03-AZAKR` scaling is 10,000 counts/mm with A=1/B=1. A +0.100 mm
+startup-relative round trip completed without alarm: raw -37 to approximately
+960 and back to -34. The guarded follow-up envelope is +/-0.500 mm from the
+startup feedback position at 0.5 mm/s.
+
+The subsequent +0.500 mm command reached raw 4,966 exactly and remained at
+alarm `0x0000`. A guarded -0.500 mm recovery after restart returned exactly to
+raw -34 with no alarm. Both EtherCAT slaves were OP and the configured domain
+working counter was 3/3 during the diagnostic check. This verifies Motor 4's
+address, scaling, bidirectional motion, and repeatability over 0.500 mm.
+
+The first slave-1-only launch caused upstream slave 0 to alternate EtherCAT AL
+states with code `0x001B` (SyncManager watchdog), although slave 1 stayed OP at
+WorkingCounter 3/3. The revised launch cyclically maps slave 0 through a passive
+`GenericEcSlave` with controlword/mode held at zero; it must not enable Motors
+1/2. Motor 4's guarded test speed is now 2.0 mm/s. Motor 3 speed remains pending
+because slave 0 Axis 3 is still recorded as disconnected.
+
+The combined GUI/backend now owns both physical AZD3A slaves: Motors 1/2 use
+slave 0 and Motor 4 uses slave 1 Axis 1. Motor 4 exposes guarded absolute
+targets from 0..15 mm with distance-adaptive 2/5/10 mm/s profiles. This removes
+the passive-keepalive case from combined operation because both slaves have
+real cyclic PDO mappings. Runtime validation was pending at that stage.
+
+Runtime validation is now complete for step-by-step combined control: the
+operator confirmed Motors 1 and 2 remained controllable and Motor 4 physically
+moved after its finite CSP plugin startup latch was removed. Motor 4 startup
+safety is enforced by the feedback-aware application guard, which rejects
+commands until valid feedback exists. See
+`MOTOR4_COMMISSIONING_POSTMORTEM.md` for the root-cause and validation record.
+
+Motor 6 is connected to AZD3A slave 1, local Axis 3. Its motor is
+`AZM46AK-PS50` (50:1 planetary gear) and its conveyor is a MISUMI
+`SVKA-150-795-25-...` with a 30 mm drive pulley. Live A=1/B=1 values give
+500,000 counts per output revolution. After connection and power cycle, Axis 3
+reported alarm/error `0x0000`, status `0x0270`, and raw position 2,280,574.
+The initial guarded test is capped at 1 output rpm (about 1.5708 mm/s belt
+speed) with a 1 rpm/s ramp and 0.5-second command watchdog.
+
+The first physical 1 rpm commissioning run completed successfully. Positive
+RPM moved the conveyor smoothly in the operator-confirmed **forward**
+direction. Raw position increased from 2,280,574 to 2,358,024 counts, a change
+of 77,450 counts (0.1549 output revolution, approximately 14.6 mm of belt
+travel with the 30 mm pulley). After the timed command ended, feedback showed
+zero velocity and Axis 3 alarm `0x4040:03=0x0000`. The initial direction,
+scaling, watchdog stop, and 1 rpm commissioning profile are therefore
+physically validated.
+
+### Motor 6 and conveyor specification record
+
+This table preserves the hardware data collected during commissioning. Source
+types are explicit so that a catalog value is not confused with a live drive
+setting or a software safety limit.
+
+| Item | Value | Evidence |
+| --- | --- | --- |
+| Motor model | `AZM46AK-PS50` | Physical nameplate photo |
+| Manufacturer / family | Oriental Motor, AZ Series closed-loop stepper with mechanical absolute encoder | Official product page |
+| Frame size | 42 mm (1.65 in) | Official product page |
+| Gear type and ratio | Planetary, 50:1 | Model suffix and official product page |
+| Nameplate winding rating | 2.04 VDC, 1.48 A | Physical nameplate photo |
+| Nameplate step angle | 0.0072 degrees/step | Physical nameplate photo |
+| Motor length | 121.5 mm (4.78 in) | Official product page |
+| Holding torque | 3 N m (420 oz-in) | Official product page |
+| Holding torque at standstill | 3 N m (425 oz-in) | Official product page |
+| Permissible output speed | 0..60 rpm | Official product page |
+| Backlash | 15 arc min (0.25 degrees) | Official product page |
+| Stop-position accuracy | +/-4 arc min (+/-0.067 degrees) | Official product page |
+| Electromagnetic brake | Not equipped | Official product page |
+| Rotor inertia | `55e-7 kg m^2` | Official product page |
+| Conveyor label | `SVKA-150-795-25-NV-NM-NH-W-R-...` | Physical conveyor label photo; trailing option text was outside/unclear in the photo |
+| Conveyor family | MISUMI SV Series, SVKA end-drive flat-belt conveyor, two-groove frame | Official MISUMI catalog |
+| Belt label | `HBLTWH150-1.68` | Physical conveyor label photo |
+| Belt width | 150 mm | Conveyor and belt label model strings |
+| Pulley-center distance | 795 mm | Conveyor label model string |
+| Drive pulley diameter | 30 mm | Official MISUMI SVKA catalog and calculation table |
+| Live electronic gearing | A=1, B=1 | SDO `0x7091:01/02` read from slave 1 Axis 3 |
+| Live software conversion | 500,000 drive counts/output revolution | Verified commissioning configuration; not the catalog's selectable pulse-resolution figure |
+| Current GUI speed cap | 5 output rpm | Project software safety limit, not the 60 rpm hardware maximum |
+
+The conversions used by the Motor 6 ROS configuration are:
+
+```text
+500,000 counts/output revolution
+79,577.47154594767 counts/output radian
+0.000012566370614359173 output radian/count
+
+belt travel/output revolution = pi * 30 mm = 94.2477796077 mm
+belt speed at 1 output rpm = pi * 30 / 60 = 1.57079632679 mm/s
+belt distance/count = pi * 30 / 500,000 = 0.000188495559215 mm/count
+```
+
+The Oriental Motor product page also lists a selectable-resolution example of
+0.0072 degrees/pulse at 1,000 P/R. That catalog pulse setting must not replace
+the live 500,000-count/output-revolution ROS conversion without a new drive
+configuration and a measured scaling test.
 
 ## Machine sequence sources
 
@@ -73,7 +170,81 @@ has separately confirmed that the required indexed action is 90 degrees CW and
 then 90 degrees CCW back to the captured starting position. Treat that return
 as an additional confirmed requirement pending a revised sequence drawing.
 
-## Axis 1: linear actuator
+## Axis 1: Motor 1 linear slide
+
+Current hardware is an `AZM46AK` motor with a label stating that its parameters
+are set for `EZSM3LD040AZAK`. The actuator has a 12 mm lead, 400 mm stroke,
+600 mm/s catalog maximum speed, and no electromagnetic brake. The assembled
+machine, not the catalog stroke, determines the usable software limits.
+
+Live reads after rewiring reported no alarm (`0x603F=0x0000`), normal stopped
+status (`0x6041=0x0270`), position 1,700 counts, and electronic gear A=1/B=1.
+Thus the current conversion is:
+
+```text
+10,000 counts/motor revolution
+12 mm/revolution
+833.333333 counts/mm
+833,333.333333 counts/m
+0.0012 mm/count
+0.0000012 m/count
+```
+
+An initial stopped SDO read returned 1,700 counts. The subsequent ROS
+feedback-only launch returned exactly 1,924 counts = 2.3088 mm, so that latest
+measured value is the commissioning start. Initial motion is restricted to
+2.3088..3.3088 mm, moving only away from the observed start end. The first
+target was 2,007 counts = 2.4084 mm, a +0.0996 mm move.
+
+The later +0.9996 mm test produced overload `0xFF30`: the actuator advanced
+only to about 2,019 counts while the target reached 2,757. Inspection showed
+the carriage at the lower physical end, so increasing counts was treated as
+the unsafe direction. After alarm reset, the actual position was 1,999 counts
+(2.3988 mm). The revised recovery window permits only decreasing counts,
+1.3992..2.3988 mm. Its first opposite-direction target is 1,916 counts =
+2.2992 mm, a -0.0996 mm move. Do not interpret the drive coordinate as
+measured distance from the physical end, and do not write a new home offset
+during initial commissioning.
+
+The opposite-direction recovery tests then succeeded. A target of 1,916 counts
+settled at 1,917 counts, and a staged target of 1,582 counts settled at 1,586
+counts (1.9032 mm). The operator physically confirmed that decreasing counts
+move the carriage upward, away from the lower stop. The total measured travel
+from the 1,999-count post-reset capture was -413 counts = -0.4956 mm, with no
+reported alarm. Increasing counts is therefore downward on the installed
+mechanism and must remain blocked at the captured lower-end boundary.
+
+The final staged target in this first window was 1,166 counts = 1.3992 mm.
+Feedback settled at 1,172 counts = 1.4064 mm, six counts (0.0072 mm) from the
+target. Relative to the 1,999-count post-reset lower-end capture, measured
+upward travel was 827 counts = 0.9924 mm. Axis 1 alarm `0x603F` remained
+`0x0000`. This completes the first approximately 1 mm upward commissioning
+move on the assembled Motor 1 mechanism; it does not yet define a machine home
+or authorize downward travel into the lower stop.
+
+For the next commissioning stage, the 1,999-count lower-end capture is used as
+a provisional software zero without writing the drive's home offset. ROS Motor
+1 coordinates are now positive upward:
+
+```text
+ROS command to raw counts: raw = -833333.3333333334 * position_m + 1999
+Raw counts to ROS state:    position_m = -0.0000012 * raw + 0.0023988
+```
+
+At the last raw feedback of 1,172 counts, ROS therefore reports 0.9924 mm above
+the provisional zero. The initial operational envelope is only 0..5 mm upward.
+Commissioning speed was increased from 0.5 to 2 mm/s and acceleration from 1
+to 5 mm/s^2. These are conservative assembly-test values, not final machine
+requirements or actuator capability limits.
+
+The 2 mm/s stage reached 1.9920 mm and held for two minutes while enabled, with
+no alarm. A subsequent safe-park command requested 0.0996 mm before shutdown;
+the stopped SDO read was raw 1,898 = 0.1212 mm above provisional zero and the
+alarm remained `0x0000`. Because zero is the captured lower mechanical end,
+the runtime guard now uses 0.0996 mm as its minimum command and rejects an
+exact-zero target.
+
+### Previous Axis 1 commissioning hardware (disconnected)
 
 Oriental Motor identifies `DR28T1A03-AZAKR` as:
 
@@ -197,7 +368,7 @@ value to the raw controller. Live validation succeeded from a retained
 approximately 15 mm position: startup remained fault-free and the subsequent
 guarded return command produced physical motion.
 
-## Axis 3: rotary Motor 5
+## Historical Axis 3 commissioning: rotary Motor 5 (currently disconnected)
 
 Oriental Motor identifies `AZM46AK-FC20DA` as:
 
@@ -277,5 +448,16 @@ values are valid absolute multi-turn position counts, not fault codes.
   `vendor/oriental_motor/AZ_Family_Catalog_2018-2019.pdf`
 - AZM46AK-FC20DA:
   <https://catalog.orientalmotor.com/item/az-series-42mm-absolute-stepper-motors/az-series-42mm-absolute-encoder-stepper-motors-dc/azm46ak-fc20da>
+- AZM46AK-PS50 Motor 6 product page (specifications checked 2026-09-21):
+  <https://catalog.orientalmotor.com/item/42mm-frame-stepper-motors/az-series-42mm-absolute-encoder-stepper-motors-dc/azm46ak-ps50>
+- MISUMI SVKA catalog page, including the 30 mm pulley and ordering fields
+  (specifications checked 2026-09-21):
+  <https://us.misumi-ec.com/pdf/fa/2019/2019_US_1254.pdf>
+  Local archived copy:
+  `vendor/misumi/SVKA_catalog_2019_pages_1254-1255.pdf` (SHA-256
+  `180f1ce5489386ba3484f3c16d8b2449b20baf5ebc22bc15fa62572931a82199`)
+- MISUMI conveyor belt calculation table, independently listing the SVKA
+  30 mm pulley (checked 2026-09-21):
+  <https://us.misumi-ec.com/maker/misumi/mech/product/cvs/calculation/>
 - Multi-axis EtherCAT manual:
   `vendor/oriental_motor/HM-60323-7E.pdf`

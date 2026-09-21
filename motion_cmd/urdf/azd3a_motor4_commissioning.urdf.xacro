@@ -1,0 +1,65 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="azd3a_motor4_commissioning">
+  <link name="motor4_base"/>
+  <link name="motor4_table"/>
+  <link name="slave0_keepalive_base"/>
+  <link name="slave0_keepalive_table"/>
+
+  <joint name="slave0_keepalive_mount" type="fixed">
+    <parent link="motor4_base"/>
+    <child link="slave0_keepalive_base"/>
+  </joint>
+
+  <joint name="slave0_keepalive_joint" type="prismatic">
+    <parent link="slave0_keepalive_base"/>
+    <child link="slave0_keepalive_table"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-1.0" upper="1.0" velocity="1.0" effort="1.0"/>
+  </joint>
+
+  <joint name="motor4_joint" type="prismatic">
+    <parent link="motor4_base"/>
+    <child link="motor4_table"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-0.030" upper="0.030" velocity="0.040" effort="10.0"/>
+  </joint>
+
+  <ros2_control name="AZD3A_motor4_commissioning" type="system">
+    <hardware>
+      <plugin>ethercat_driver/EthercatDriver</plugin>
+      <param name="master_id">0</param>
+      <param name="control_frequency">200</param>
+      <param name="number_of_physical_drives">2</param>
+    </hardware>
+
+    <!--
+      Slave 0 must receive cyclic outputs while slave 1 is controlled. This
+      GenericEcSlave sends only safe zero defaults and performs no CiA 402
+      state transitions, so Motors 1/2 cannot be enabled by this launch.
+    -->
+    <joint name="slave0_keepalive_joint">
+      <state_interface name="position"/>
+      <ec_module name="azd3a_slave0_passive_keepalive">
+        <plugin>ethercat_generic_plugins/GenericEcSlave</plugin>
+        <param name="alias">0</param>
+        <param name="position">0</param>
+        <param name="slave_config">$(find motor_controller)/config/azd3a_slave0_passive_keepalive.yaml</param>
+      </ec_module>
+    </joint>
+
+    <joint name="motor4_joint">
+      <command_interface name="position"/>
+      <state_interface name="position"/>
+
+      <ec_module name="azd3a_slave1_axis1_motor4">
+        <plugin>ethercat_generic_plugins/EcCiA402Drive</plugin>
+        <param name="alias">0</param>
+        <param name="position">1</param>
+        <!-- One encoder count: reject any startup jump beyond 0.0001 mm. -->
+        <param name="position_startup_tolerance">0.0000001</param>
+        <param name="mode_of_operation">8</param>
+        <param name="slave_config">$(find motor_controller)/config/azd3a_motor4_commissioning_slave.yaml</param>
+      </ec_module>
+    </joint>
+  </ros2_control>
+</robot>

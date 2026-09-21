@@ -10,12 +10,12 @@ from sensor_msgs.msg import JointState
 from std_msgs.msg import Float64MultiArray
 
 
-FORWARD_TARGET_M = 0.005
-RETURN_TARGET_M = 0.001
-SPEED_M_PER_S = 0.0005
+FORWARD_TARGET_M = 0.0019992  # 1,666 counts upward from provisional zero
+RETURN_TARGET_M = 0.0009996   # 833 counts upward from provisional zero
+SPEED_M_PER_S = 0.002
 PUBLISH_RATE_HZ = 20.0
-MAX_START_POSITION_M = 0.006
-MIN_START_POSITION_M = -0.0001
+MAX_START_POSITION_M = 0.0011
+MIN_START_POSITION_M = 0.0009
 
 
 class Axis1VideoDemo(Node):
@@ -79,14 +79,15 @@ def main() -> None:
                 f"{MIN_START_POSITION_M}..{MAX_START_POSITION_M} m demo region"
             )
         print(
-            "Planned motion: slowly move Axis 1 to 5 mm, then return to 1 mm.\n"
+            "Planned motion: move Motor 1 upward to 1.9992 mm, then return "
+            "to 0.9996 mm above provisional zero.\n"
             "The mechanism must be clear and the physical power cutoff accessible."
         )
         if input('Type exactly "VIDEO MOVE" to continue: ') != "VIDEO MOVE":
             raise RuntimeError("Cancelled; no demo motion was commanded")
         node.ramp_to(FORWARD_TARGET_M)
         node.ramp_to(RETURN_TARGET_M)
-        node.get_logger().info("Video movement complete; final target is 1.000 mm")
+        node.get_logger().info("Video movement complete; final target is 0.9996 mm")
     except (RuntimeError, KeyboardInterrupt) as error:
         node.get_logger().error(str(error))
         sys.exit_code = 2

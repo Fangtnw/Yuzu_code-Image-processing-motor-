@@ -65,10 +65,10 @@ Axis 2 guarded RPM control:
 ros2 launch motor_controller azd3a_axis2_tiny_spin.launch.py
 ```
 
-The default remains the already verified 25 rpm commissioning ceiling. For
-the final 200-250 rpm requirement, set the ceiling explicitly and validate one
-level at a time. The raw ros2_control boundary is 250 rpm and the guard rejects
-commands above the selected launch ceiling.
+The Motor 2 default ceiling is now the validated 250 rpm machine requirement.
+For maintenance or recommissioning, set a lower ceiling explicitly and validate
+one level at a time. The raw ros2_control boundary and runtime guard are both
+250 rpm.
 
 ```bash
 # Intermediate validation (recommended before the final range)
@@ -81,6 +81,12 @@ ros2 launch motor_controller azd3a_axis2_tiny_spin.launch.py \
 
 ros2 launch motor_controller azd3a_axis2_tiny_spin.launch.py \
   max_rpm:=250 max_acceleration_rpm_s:=25
+```
+
+For normal combined Motor 1/Motor 2 GUI operation:
+
+```bash
+ros2 launch motor_controller azd3a_motor1_motor2_gui.launch.py
 ```
 
 The current Axis 2 commissioning guard accepts RPM directly on:

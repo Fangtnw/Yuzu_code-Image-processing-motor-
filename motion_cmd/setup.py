@@ -29,6 +29,10 @@ setup(
             f"azd3a_axis2_velocity_guard = {package_name}.azd3a_axis2_velocity_guard:main",
             f"azd3a_axis3_velocity_guard = {package_name}.azd3a_axis3_velocity_guard:main",
             f"azd3a_axis3_index_guard    = {package_name}.azd3a_axis3_index_guard:main",
+            f"azd3a_motor4_commissioning_guard = {package_name}.azd3a_motor4_commissioning_guard:main",
+            f"azd3a_motor4_position_guard = {package_name}.azd3a_motor4_position_guard:main",
+            f"azd3a_motor6_conveyor_guard = {package_name}.azd3a_motor6_conveyor_guard:main",
+            f"yuzu_operator_gui          = {package_name}.yuzu_operator_gui:main",
         ],
     },
 )

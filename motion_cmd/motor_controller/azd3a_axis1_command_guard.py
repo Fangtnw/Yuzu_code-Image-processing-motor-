@@ -8,18 +8,21 @@ from sensor_msgs.msg import JointState
 from std_msgs.msg import Float64MultiArray
 
 
-# Manufacturer envelope for DR28T1A03-AZAKR. These are hard caps, not defaults.
+# Manufacturer envelope for Motor 1's EZSM3LD040AZAK linear slide.
 HARD_MIN_POSITION_M = 0.0
-HARD_MAX_POSITION_M = 0.030
-HARD_MAX_VELOCITY_M_S = 0.040
+# Acceleration remains a deliberately conservative software cap until the
+# assembled mechanism/load is commissioned.
+HARD_MAX_POSITION_M = 0.400
+HARD_MAX_VELOCITY_M_S = 0.600
 HARD_MAX_ACCELERATION_M_S2 = 0.2
-MIN_TRAVEL_INCREMENT_M = 0.000001
+MIN_TRAVEL_INCREMENT_M = 0.0000012
 
 # Conservative commissioning defaults. Launch parameters may relax them only
 # within the manufacturer envelope above.
+DEFAULT_MIN_POSITION_M = 0.0000996
 DEFAULT_MAX_POSITION_M = 0.005
-DEFAULT_MAX_VELOCITY_M_S = 0.0005
-DEFAULT_MAX_ACCELERATION_M_S2 = 0.001
+DEFAULT_MAX_VELOCITY_M_S = 0.002
+DEFAULT_MAX_ACCELERATION_M_S2 = 0.005
 UPDATE_RATE_HZ = 200.0
 PUBLIC_TOPIC = "/axis1_position_controller/commands"
 RAW_TOPIC = "/axis1_raw_position_controller/commands"
@@ -33,9 +36,12 @@ class Axis1CommandGuard(Node):
         self.target_position = None
         self.command_velocity = 0.0
         self.operator_command_received = False
+        self.feedback_joint_name = self.declare_parameter(
+            "feedback_joint_name", "axis1_joint"
+        ).value
 
         self.min_position = self.declare_parameter(
-            "min_position_m", HARD_MIN_POSITION_M
+            "min_position_m", DEFAULT_MIN_POSITION_M
         ).value
         self.max_position = self.declare_parameter(
             "max_position_m", DEFAULT_MAX_POSITION_M
@@ -65,15 +71,15 @@ class Axis1CommandGuard(Node):
             HARD_MIN_POSITION_M <= self.min_position < self.max_position
             <= HARD_MAX_POSITION_M
         ):
-            raise ValueError("Configured position range exceeds the 0..30 mm stroke")
+            raise ValueError("Configured position range exceeds the 0..400 mm stroke")
         if not 0.0 < self.max_velocity <= HARD_MAX_VELOCITY_M_S:
-            raise ValueError("Configured velocity exceeds the 40 mm/s specification")
+            raise ValueError("Configured velocity exceeds the 600 mm/s specification")
         if not 0.0 < self.max_acceleration <= HARD_MAX_ACCELERATION_M_S2:
             raise ValueError("Configured acceleration exceeds the 0.2 m/s^2 specification")
 
     def on_joint_state(self, message: JointState) -> None:
         try:
-            index = message.name.index("axis1_joint")
+            index = message.name.index(self.feedback_joint_name)
             position = message.position[index]
         except (ValueError, IndexError):
             return
@@ -103,7 +109,7 @@ class Axis1CommandGuard(Node):
         increments = round(target / MIN_TRAVEL_INCREMENT_M)
         if abs(target - increments * MIN_TRAVEL_INCREMENT_M) > 1e-10:
             self.get_logger().error(
-                "REJECTED Axis 1 target: value must use 0.001 mm increments"
+                "REJECTED Axis 1 target: value must align to a 1.2 um encoder count"
             )
             return
         if self.command_position is None:

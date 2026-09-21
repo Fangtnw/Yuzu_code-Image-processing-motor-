@@ -1,0 +1,34 @@
+controller_manager:
+  ros__parameters:
+    update_rate: 200
+
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+
+    axis1_raw_position_controller:
+      type: position_controllers/JointGroupPositionController
+
+    axis2_raw_velocity_controller:
+      type: velocity_controllers/JointGroupVelocityController
+
+    motor4_raw_position_controller:
+      type: position_controllers/JointGroupPositionController
+
+    motor6_raw_velocity_controller:
+      type: velocity_controllers/JointGroupVelocityController
+
+axis1_raw_position_controller:
+  ros__parameters:
+    joints: [motor1_motor2]
+
+axis2_raw_velocity_controller:
+  ros__parameters:
+    joints: [motor1_motor2]
+
+motor4_raw_position_controller:
+  ros__parameters:
+    joints: [motor4_joint]
+
+motor6_raw_velocity_controller:
+  ros__parameters:
+    joints: [motor4_joint]

@@ -1,6 +1,6 @@
 # EtherCAT Bring-up Progress
 
-Last updated: 2026-08-06
+Last updated: 2026-09-21
 
 ## Goal
 
@@ -9,6 +9,52 @@ with ROS 2 Humble. First prove discovery and read-only communication; only then
 prepare a minimal one-axis `ros2_control` experiment.
 
 ## Current Result
+
+On 2026-09-21 the drive was rewired to match the machine requirement order.
+Axis 1 now carries logical Motor 1, an `AZM46AK` parameterized for the
+`EZSM3LD040AZAK` 12 mm-lead, 400 mm-stroke linear slide. Axis 2 remains logical
+Motor 2 (`AZM46AK-FC7.2UA`), and Axis 3 is disconnected. The former Axis 1
+Motor 3/4 actuator configuration is historical and must not be used with the
+new wiring.
+
+Motor 1 read-only state is healthy: error `0x0000`, status `0x0270`, position
+1,700 counts, and electronic gear A=1/B=1. The later ROS feedback-only launch
+reported exactly 1,924 counts = 2.3088 mm. This gives 833,333.333 counts/m and
+1.2e-6 m/count. A positive 0.9996 mm test then faulted with overload `0xFF30`
+while the carriage was at the lower physical end. Operating/base current were
+already 100%, and the overload timer was 5 seconds. After reset, feedback was
+1,999 counts = 2.3988 mm. The guard now blocks further increasing-count motion
+and permits a first -0.0996 mm direction test within 1.3992..2.3988 mm.
+
+The reversed direction test passed. Motor 1 first moved from the 1,999-count
+capture toward a 1,916-count target and settled at 1,917 counts. A subsequent
+staged target of 1,582 counts settled at 1,586 counts = 1.9032 mm. The operator
+confirmed that decreasing counts move the installed carriage upward, away from
+the lower stop. Total measured upward travel was 413 counts = 0.4956 mm, with
+no reported fault. The prior `0xFF30` overload is therefore consistent with
+increasing counts driving downward into the lower mechanical stop.
+
+The final target in the guarded recovery window was 1,166 counts = 1.3992 mm.
+Motor 1 settled at 1,172 counts = 1.4064 mm, only 0.0072 mm from target. Total
+measured travel from the 1,999-count post-reset lower-end capture was 0.9924 mm
+upward. The final Axis 1 error object was `0x0000`. This verifies the corrected
+12 mm-lead scaling, safe upward direction, guarded ramp, and approximately
+1 mm assembled-system travel. Machine homing and a larger operational travel
+envelope remain separate commissioning tasks.
+
+The 1,999-count lower-end capture is now used as a provisional software zero;
+the drive home offset was not changed. ROS position is positive upward, so the
+last raw feedback of 1,172 counts becomes 0.9924 mm. The next guarded envelope
+is 0..5 mm upward. Commissioning velocity was conservatively increased from
+0.5 to 2 mm/s and acceleration from 1 to 5 mm/s^2. A true repeatable machine
+home and the final requirement-based travel/speed remain pending.
+
+The 2 mm/s test reached 1.9920 mm and held that position for two minutes while
+enabled without an alarm. Motor 1 was then commanded to the 0.0996 mm safe
+park before shutdown. The stopped raw position was 1,898 counts = 0.1212 mm
+above provisional zero, and error `0x603F` remained `0x0000`. The guarded
+minimum is now 0.0996 mm so an operator cannot command the captured lower
+mechanical-end coordinate directly.
 
 The discovery and software-installation phase is complete.
 
@@ -37,9 +83,9 @@ captured feedback evidence before adding Axis 2 or Axis 3 motion.
 
 | Axis | Connected hardware | Type |
 | --- | --- | --- |
-| Axis 1 | `DR28T1A03-AZAKR` | Machine Motor 3/4 actuator type, currently wired to Axis 1 for bring-up; 1 mm-lead, 30 mm-stroke linear actuator |
+| Axis 1 | `AZM46AK` / `EZSM3LD040AZAK` | Machine Motor 1; 12 mm-lead, 400 mm-stroke linear slide, lower-end recovery window 1.3992-2.3988 mm |
 | Axis 2 | `AZM46AK-FC7.2UA` | Machine Motor 2 rotary axis; 200-250 rpm spin/stop target role |
-| Axis 3 | `AZM46AK-FC20DA` | Machine Motor 5 indexed rotary axis; rotate 90 degrees CW and return 90 degrees CCW at up to 20 rpm |
+| Axis 3 | Disconnected | Previous Motor 5 commissioning connection removed during requirement-order rewiring |
 
 The `DR28T1A03-AZAKR` is not throwaway hardware; it is the machine Motor 3/4
 actuator type from the mechanism plan. For the current one-drive bring-up, one
@@ -50,6 +96,98 @@ actuator with a 1 mm ball-screw lead, 30 mm stroke, 40 mm/s maximum speed, and
 motor/gearbox models, so their scaling must be confirmed separately from
 physical labels, MEXE02, and live SDO settings before motion. Complete hardware
 and preliminary scaling notes are recorded in `motion_cmd/AZD3A_HARDWARE.md`.
+
+On 2026-09-21, logical Motor 4 was connected to AZD3A slave 1, local Axis 1
+(CN7). The confirmed `DR28T1A03-AZAKR` has A=1/B=1 gearing and therefore uses
+10,000 counts/mm. A guarded startup-relative +0.100 mm test moved from raw -37
+to approximately raw 960, then returned to raw -34 with alarm `0x0000`. This
+verifies EtherCAT addressing, scaling, forward motion, return motion, and
+feedback for Motor 4. The next commissioning bound is +/-0.500 mm from the
+startup feedback position at 0.5 mm/s.
+
+The +0.500 mm follow-up reached exactly 4,966 counts (`0.0004966 m`) with no
+alarm. After the launch was restarted at approximately 4,962 counts, the
+guarded -0.500 mm recovery returned exactly to raw -34 (`-0.0000034 m`), again
+with alarm `0x0000`. While diagnosing transient aggregate AL-state messages,
+both slaves were confirmed OP and the Motor 4 domain reported WorkingCounter
+3/3 with zero master frame loss. Motor 4 commissioning through +/-0.500 mm is
+therefore complete; larger travel and machine homing remain pending.
+
+The initial Motor 4-only two-slave launch left upstream slave 0 without cyclic
+PDO output. Live sampling proved slave 0 oscillated through OP/INIT/SAFEOP while
+slave 1 remained OP; AL status code `0x001B` identified a SyncManager watchdog.
+The launch now includes slave 0 as a passive `GenericEcSlave` keepalive with
+zero controlword/mode defaults, while Motor 4 remains the only enabled motion
+axis. Motor 4's commissioning velocity was raised conservatively from 0.5 to
+2.0 mm/s (catalog maximum 40 mm/s). Runtime validation of the keepalive change
+is pending. Motor 3 remains disconnected and cannot be speed-tested yet.
+
+Motor 4 was then integrated into the existing Motor 1+2 operator GUI and
+two-slave backend. GUI commands are absolute ABZO positions from 0..15 mm in
+0.001 mm increments. The Motor 4 guard selects 2 mm/s for moves through 1 mm,
+5 mm/s through 5 mm, and 10 mm/s for longer moves, with corresponding guarded
+accelerations of 0.020, 0.050, and 0.100 m/s^2. The internal command interface
+allows only a -0.01 mm startup margin for the retained -0.0034 mm encoder
+origin; public commands remain non-negative. Software validation passed, but
+the combined three-motor runtime test was pending at that stage.
+
+The first combined run showed Motor 4 feedback and a fully connected guarded
+topic path, but accepted commands did not change drive object `0x607A`. The raw
+controller topic correctly published `0.002 m` while `0x607A` stayed equal to
+feedback at 4,965 counts. Source tracing identified the CSP startup
+synchronizer: its one-count tolerance had not armed during asynchronous
+multi-controller startup, so it intentionally overrode commands with measured
+position. The combined Motor 4 startup tolerance is now one actuator command
+increment (0.001 mm); larger retained-command jumps remain blocked. Runtime
+retest is pending.
+
+The one-increment tolerance retest still remained latched even though slave 1
+reached Operation Enabled and the raw guarded topic continuously published the
+requested `0.002 m`. The Motor 4 finite plugin latch was therefore removed.
+Startup synchronization remains enforced by the Motor 4 application guard,
+which continuously follows feedback before the first operator command and
+rejects any command until valid feedback exists. Motor 1 retains its existing
+separate startup tolerance. Runtime retest was pending at that stage.
+
+The final configuration removed Motor 4's finite plugin latch and retained the
+feedback-aware synchronization in `azd3a_motor4_position_guard.py`. After the
+rebuild and restart, the operator confirmed physical Motor 4 movement from the
+combined GUI while Motors 1 and 2 remained controllable. The combined two-slave
+backend is therefore validated for step-by-step control of Motors 1, 2, and 4.
+The domain had previously been confirmed at WorkingCounter 6/6 with both slaves
+OP. Motor 4 now has a guarded absolute range of 0..15 mm with distance-adaptive
+2/5/10 mm/s profiles. Motor 3 remains disconnected and pending commissioning.
+
+The complete problem/fix record is in
+`motion_cmd/MOTOR4_COMMISSIONING_POSTMORTEM.md`.
+
+Motor 6 commissioning preparation began on AZD3A slave 1, local Axis 3. The
+physical labels identify an Oriental Motor `AZM46AK-PS50` driving a MISUMI
+`SVKA-150-795-25-...` conveyor. After connecting the motor and power-cycling
+controller #2, Axis 3 reported alarm/error `0x0000`, status `0x0270`, and raw
+position 2,280,574 counts. A=1/B=1 and the 50:1 gearbox give 500,000 counts per
+output revolution. MISUMI specifies a 30 mm drive pulley, so 1 output rpm is
+approximately 1.5708 mm/s belt speed. A separate watchdog-protected 1 rpm
+commissioning launch is built; physical direction testing is pending.
+
+Motor 6's first physical commissioning run is now complete. A guarded
+`+1.0 rpm` command moved the conveyor smoothly in the forward direction. Raw
+position changed from 2,280,574 to 2,358,024 counts: 77,450 counts, or 0.1549
+output revolution and approximately 14.6 mm of travel on the 30 mm drive
+pulley. After the timed command and watchdog stop, `/joint_states` reported
+zero velocity and the Axis 3 alarm remained `0x0000`. This validates positive
+direction, live scaling, controlled stopping, and the standalone Motor 6
+commissioning path. The 1 rpm safety cap remains in place pending deliberate
+higher-speed testing and integration into the combined operator GUI.
+
+Motor 6 was subsequently integrated into the combined Motors 1/2/4 operator
+GUI and two-slave backend. AZD3A #2 now has one composite slave mapping: Axis 1
+Motor 4 CSP position plus Axis 3 Motor 6 CSV velocity. This prevents competing
+ROS hardware instances from claiming the same EtherCAT slave. The guarded
+Motor 6 ceiling was increased conservatively from 1 to 5 output rpm with a
+2 rpm/s ramp and the existing 0.5-second watchdog. At the 5 rpm cap, calculated
+belt speed is approximately 7.85 mm/s. Runtime validation of combined GUI
+operation at the new limit is pending.
 
 ## Verified Read-only Drive State
 
@@ -739,6 +877,25 @@ return; that return is recorded as a separate operator-confirmed requirement
 until the source sequence drawing is revised.
 
 ## Daily startup reference
+
+## Initial Yuzu operator GUI
+
+A Tkinter/ROS 2 operator panel is available as `yuzu_operator_gui`. It provides
+Motor 1 position and safe-park controls, Motor 2 guarded CW/CCW RPM and stop
+controls, live feedback, backend availability, count alignment, and stale-data
+indication. It publishes only to the existing guarded public topics. The GUI
+limits Motor 1 to 0.0996..5 mm and Motor 2 to the validated 250 rpm requirement.
+
+The EtherCAT CiA 402 plugin now supports a secondary state machine inside the
+same physical multi-axis slave. The combined PDO configuration maps Axis 1 CSP
+and Axis 2 CSV through one AZD3A slave instance, with separate ros2_control
+position and velocity controllers and both existing guards. The launch
+`azd3a_motor1_motor2_gui.launch.py` starts the combined backend and GUI, so the
+sequence can command Motor 1 and Motor 2 step by step without restarting or
+competing for EtherCAT ownership. GUI usage is documented in
+`motion_cmd/YUZU_OPERATOR_GUI.md`. Software build, xacro expansion, launch
+loading, 17 repository tests, and the 50-test driver suite pass; live combined
+hardware validation is the next step.
 
 The single after-reboot and troubleshooting reference is now:
 

@@ -78,7 +78,7 @@ def generate_launch_description() -> LaunchDescription:
         [
             DeclareLaunchArgument(
                 "max_rpm",
-                default_value="25.0",
+                default_value="250.0",
                 description="Guarded absolute Axis 2 speed ceiling in rpm",
             ),
             DeclareLaunchArgument(

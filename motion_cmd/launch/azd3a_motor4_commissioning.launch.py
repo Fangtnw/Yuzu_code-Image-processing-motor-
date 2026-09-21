@@ -1,4 +1,4 @@
-"""Launch the AZD3A Axis 1 tiny-motion configuration."""
+"""Launch tightly bounded commissioning control for logical Motor 4."""
 
 from pathlib import Path
 
@@ -14,15 +14,10 @@ from launch.substitutions import Command
 
 def generate_launch_description() -> LaunchDescription:
     package_share = Path(get_package_share_directory("motor_controller"))
-    xacro_file = package_share / "urdf" / "azd3a_axis1_tiny_move.urdf.xacro"
-    controllers_file = (
-        package_share / "config" / "azd3a_axis1_tiny_move_controllers.yaml"
-    )
+    xacro_file = package_share / "urdf" / "azd3a_motor4_commissioning.urdf.xacro"
+    controllers_file = package_share / "config" / "azd3a_motor4_commissioning_controllers.yaml"
     robot_description = {
-        "robot_description": ParameterValue(
-            Command(["xacro ", str(xacro_file)]),
-            value_type=str,
-        )
+        "robot_description": ParameterValue(Command(["xacro ", str(xacro_file)]), value_type=str)
     }
 
     control_node = Node(
@@ -31,53 +26,35 @@ def generate_launch_description() -> LaunchDescription:
         parameters=[robot_description, str(controllers_file)],
         output="screen",
     )
-
     state_broadcaster = Node(
         package="controller_manager",
         executable="spawner",
         arguments=["joint_state_broadcaster", "-c", "/controller_manager"],
         output="screen",
     )
-
     position_controller = Node(
         package="controller_manager",
         executable="spawner",
-        arguments=["axis1_raw_position_controller", "-c", "/controller_manager"],
+        arguments=["motor4_raw_position_controller", "-c", "/controller_manager"],
         output="screen",
     )
-
     command_guard = Node(
         package="motor_controller",
-        executable="azd3a_axis1_command_guard",
-        parameters=[
-            {
-                # Provisional machine coordinates: the captured lower end is
-                # zero and positive ROS motion is upward. Keep the first
-                # assembled-machine envelope intentionally small.
-                # Never command the captured mechanical-end coordinate itself.
-                "min_position_m": 0.0000996,
-                "max_position_m": 0.005,
-                "max_velocity_m_s": 0.002,
-                "max_acceleration_m_s2": 0.005,
-            }
-        ],
+        executable="azd3a_motor4_commissioning_guard",
         output="screen",
     )
-
     state_publisher = Node(
         package="robot_state_publisher",
         executable="robot_state_publisher",
         parameters=[robot_description],
         output="screen",
     )
-
     shutdown_on_control_exit = RegisterEventHandler(
         OnProcessExit(
             target_action=control_node,
             on_exit=[EmitEvent(event=Shutdown(reason="ros2_control_node exited"))],
         )
     )
-
     return LaunchDescription(
         [
             control_node,
