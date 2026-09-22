@@ -5,15 +5,16 @@
   <link name="motor4_table"/>
 
   <!--
-    One composite ros2_control joint represents two internal axes of the same
-    physical AZD3A slave: position is Motor 1; velocity is Motor 2. This keeps
-    one EtherCAT slave instance and two separately claimed command interfaces.
+    One composite ros2_control joint represents three internal axes of the same
+    physical AZD3A slave: position is Motor 1, velocity is Motor 2, and the
+    custom motor3_position interface is Motor 3. This keeps one EtherCAT slave
+    instance while allowing each axis to be claimed by a separate controller.
   -->
   <joint name="motor1_motor2" type="prismatic">
     <parent link="base_link"/>
     <child link="motor1_table"/>
     <axis xyz="0 0 1"/>
-    <limit lower="0.0000996" upper="0.005" velocity="0.002" effort="43.0"/>
+    <limit lower="0.0000996" upper="0.200" velocity="0.015" effort="43.0"/>
   </joint>
 
   <joint name="motor4_joint" type="prismatic">
@@ -21,7 +22,7 @@
     <child link="motor4_table"/>
     <axis xyz="1 0 0"/>
     <!-- Tiny negative margin accepts the retained ABZO origin (-0.0034 mm). -->
-    <limit lower="-0.00001" upper="0.030" velocity="0.040" effort="10.0"/>
+    <limit lower="-0.00001" upper="0.030" velocity="0.008" effort="10.0"/>
   </joint>
 
   <ros2_control name="AZD3A_motor1_motor2" type="system">
@@ -35,14 +36,19 @@
     <joint name="motor1_motor2">
       <command_interface name="position">
         <param name="min">0.0000996</param>
-        <param name="max">0.005</param>
+        <param name="max">0.200</param>
       </command_interface>
       <command_interface name="velocity">
         <param name="min">-26.179938779914945</param>
         <param name="max">26.179938779914945</param>
       </command_interface>
+      <command_interface name="motor3_position">
+        <param name="min">0.0</param>
+        <param name="max">0.015</param>
+      </command_interface>
       <state_interface name="position"/>
       <state_interface name="velocity"/>
+      <state_interface name="motor3_position"/>
 
       <ec_module name="azd3a_motor1_motor2">
         <plugin>ethercat_generic_plugins/EcCiA402Drive</plugin>
@@ -52,6 +58,8 @@
         <param name="position_startup_tolerance">0.00001</param>
         <param name="secondary_cia402_object_index_offset">0x0800</param>
         <param name="secondary_mode_of_operation">9</param>
+        <param name="tertiary_cia402_object_index_offset">0x1000</param>
+        <param name="tertiary_mode_of_operation">8</param>
         <param name="slave_config">$(find motor_controller)/config/azd3a_motor1_motor2_slave.yaml</param>
       </ec_module>
     </joint>
@@ -63,12 +71,14 @@
         <param name="max">0.015</param>
       </command_interface>
       <command_interface name="velocity">
-        <!-- Motor 6 conveyor: guarded to +/-5 output rpm. -->
-        <param name="min">-0.5235987755982988</param>
-        <param name="max">0.5235987755982988</param>
+        <!-- Motor 6 conveyor: guarded to +/-50 output rpm. -->
+        <param name="min">-5.235987755982989</param>
+        <param name="max">5.235987755982989</param>
       </command_interface>
+      <command_interface name="motor5_position"/>
       <state_interface name="position"/>
       <state_interface name="velocity"/>
+      <state_interface name="motor5_position"/>
 
       <ec_module name="azd3a_slave1_axis1_motor4">
         <plugin>ethercat_generic_plugins/EcCiA402Drive</plugin>
@@ -84,6 +94,8 @@
         <param name="mode_of_operation">8</param>
         <param name="secondary_cia402_object_index_offset">0x1000</param>
         <param name="secondary_mode_of_operation">9</param>
+        <param name="tertiary_cia402_object_index_offset">0x0800</param>
+        <param name="tertiary_mode_of_operation">8</param>
         <param name="slave_config">$(find motor_controller)/config/azd3a_motor4_motor6_slave.yaml</param>
       </ec_module>
     </joint>

@@ -89,6 +89,25 @@ Required:
 - unloaded or mechanically secured motor for first tests
 - accessible physical power cutoff
 
+Current Yuzu peeler topology (2026-09-22):
+
+```text
+laptop EtherCAT NIC -> AZD3A #1 CN4
+AZD3A #1 CN5       -> AZD3A #2 CN4
+AZD3A #2 CN5       -> unused
+
+slave 0 Axis 1 -> Motor 1, AZM46AK / EZSM3LD040AZAK linear slide
+slave 0 Axis 2 -> Motor 2, AZM46AK-FC7.2UA yuzu rotation
+slave 0 Axis 3 -> Motor 3, reconnected; software verification/integration pending
+slave 1 Axis 1 -> Motor 4, DR28T1A03-AZAKR peeling-depth slide
+slave 1 Axis 2 -> Motor 5, not included in the current combined GUI
+slave 1 Axis 3 -> Motor 6, AZM46AK-PS50 / MISUMI SVKA conveyor
+```
+
+The current combined launch owns both slaves once and exposes Motors 1, 2, 4,
+and 6. See `motion_cmd/AZD3A_HARDWARE.md` for verified scaling and
+`motion_cmd/YUZU_OPERATOR_GUI.md` for the launch and safety limits.
+
 Do not use Wi-Fi or the normal office-network port for EtherCAT. Do not connect
 the EtherCAT chain to an ordinary network switch unless it is explicitly an
 EtherCAT device.

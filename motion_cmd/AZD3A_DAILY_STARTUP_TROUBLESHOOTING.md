@@ -20,7 +20,7 @@ Start or restart the EtherCAT master first:
 sudo /etc/init.d/ethercat restart
 ```
 
-Confirm the device, NIC, master, and slave:
+Confirm the device, NIC, master, and slaves:
 
 ```bash
 ls -l /dev/EtherCAT0
@@ -34,8 +34,9 @@ Expected essentials:
 ```text
 /dev/EtherCAT0: group ethercat, mode crw-rw----
 eno2: UP, LOWER_UP
-Master0: Link UP, Slaves: 1
+Master0: Link UP, Slaves: 2
 0  0:0  PREOP  +  AZD3A-KED rev0301
+1  0:1  PREOP  +  AZD3A-KED rev0301
 ```
 
 Then source ROS in every new terminal:
@@ -83,11 +84,37 @@ ros2 launch motor_controller azd3a_axis2_tiny_spin.launch.py \
   max_rpm:=250 max_acceleration_rpm_s:=25
 ```
 
-For normal combined Motor 1/Motor 2 GUI operation:
+For normal combined Motor 1/2/3/4/6 GUI operation:
 
 ```bash
 ros2 launch motor_controller azd3a_motor1_motor2_gui.launch.py
 ```
+
+Despite the retained launch filename, this starts all currently integrated
+machine axes: Motors 1, 2, and 3 on slave 0, plus Motor 4 Axis 1 and Motor 6
+Axis 3 on slave 1. The expected active controllers are:
+
+```text
+joint_state_broadcaster
+axis1_raw_position_controller
+axis2_raw_velocity_controller
+motor3_raw_position_controller
+motor4_raw_position_controller
+motor6_raw_velocity_controller
+```
+
+Motor 6 uses guarded topic `/motor6_conveyor/commands_rpm`, a +/-50 output-rpm
+ceiling, 2 rpm/s ramp, and 0.5-second watchdog. Positive RPM is the physically
+verified forward direction. The GUI accepts belt speed in mm/s and converts it
+to internal rpm. The 30 mm pulley gives approximately 78.54 mm/s at 50 rpm.
+Its first +1 rpm standalone test passed smoothly with no alarm; the expanded
+range requires staged physical testing beginning at the 10 mm/s GUI default.
+
+Current linear-motion requirements are Motor 1 at 15 mm/s over the guarded
+0.0996..200 mm range and Motors 3/4 at 8 mm/s over 0..15 mm. Motor 3 uses the
+custom `motor3_position` interface and `/dynamic_joint_states` feedback. Use
+the GUI's **Show motion details** control to review range, velocity,
+acceleration, and deceleration before commanding motion.
 
 The current Axis 2 commissioning guard accepts RPM directly on:
 
@@ -167,6 +194,13 @@ Stop the ROS launch first. Axis-specific CiA 402 objects are:
 /opt/etherlab/bin/ethercat upload -p 0 --type uint16 0x703F 0
 /opt/etherlab/bin/ethercat upload -p 0 --type uint16 0x7041 0
 /opt/etherlab/bin/ethercat upload -p 0 --type int32  0x7064 0
+
+# Motor 6: AZD3A #2 (slave 1), local Axis 3
+/opt/etherlab/bin/ethercat upload -p 1 --type uint16 0x4040 3
+/opt/etherlab/bin/ethercat upload -p 1 --type uint16 0x703F 0
+/opt/etherlab/bin/ethercat upload -p 1 --type uint16 0x7041 0
+/opt/etherlab/bin/ethercat upload -p 1 --type int32  0x7064 0
+/opt/etherlab/bin/ethercat upload -p 1 --type int32  0x706C 0
 ```
 
 An error code of `0x0000` means no drive alarm. Statusword `0x0270` (`624`)

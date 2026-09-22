@@ -14,8 +14,14 @@ controller_manager:
     motor4_raw_position_controller:
       type: position_controllers/JointGroupPositionController
 
+    motor3_raw_position_controller:
+      type: forward_command_controller/ForwardCommandController
+
     motor6_raw_velocity_controller:
       type: velocity_controllers/JointGroupVelocityController
+
+    motor5_raw_position_controller:
+      type: forward_command_controller/ForwardCommandController
 
 axis1_raw_position_controller:
   ros__parameters:
@@ -29,6 +35,16 @@ motor4_raw_position_controller:
   ros__parameters:
     joints: [motor4_joint]
 
+motor3_raw_position_controller:
+  ros__parameters:
+    joints: [motor1_motor2]
+    interface_name: motor3_position
+
 motor6_raw_velocity_controller:
   ros__parameters:
     joints: [motor4_joint]
+
+motor5_raw_position_controller:
+  ros__parameters:
+    joints: [motor4_joint]
+    interface_name: motor5_position

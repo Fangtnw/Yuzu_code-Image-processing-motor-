@@ -1,4 +1,4 @@
-"""Absolute-position guard with distance-adaptive speed for machine Motor 4."""
+"""Absolute-position guard for machine Motor 4 at its required speed."""
 
 import math
 
@@ -18,15 +18,8 @@ HARD_MAX_POSITION_MM = 30.0
 HARD_MAX_VELOCITY_M_S = 0.040
 HARD_MAX_ACCELERATION_M_S2 = 0.2
 UPDATE_RATE_HZ = 200.0
-
-
-def profile_for_distance(distance_mm: float) -> tuple[float, float]:
-    """Return conservative (velocity m/s, acceleration m/s^2) limits."""
-    if distance_mm <= 1.0:
-        return 0.002, 0.020
-    if distance_mm <= 5.0:
-        return 0.005, 0.050
-    return 0.010, 0.100
+REQUIRED_VELOCITY_M_S = 0.008
+DEFAULT_ACCELERATION_M_S2 = 0.050
 
 
 class Motor4PositionGuard(Node):
@@ -36,8 +29,8 @@ class Motor4PositionGuard(Node):
         self.command_position = None
         self.target_position = None
         self.command_velocity = 0.0
-        self.active_max_velocity = 0.002
-        self.active_max_acceleration = 0.020
+        self.active_max_velocity = REQUIRED_VELOCITY_M_S
+        self.active_max_acceleration = DEFAULT_ACCELERATION_M_S2
         self.operator_command_received = False
 
         self.raw_publisher = self.create_publisher(Float64MultiArray, RAW_TOPIC, 10)
@@ -46,7 +39,7 @@ class Motor4PositionGuard(Node):
         self.create_timer(1.0 / UPDATE_RATE_HZ, self.update_command)
         self.get_logger().info(
             "Motor 4 guard ready: absolute 0..15 mm, 0.001 mm increments; "
-            "distance-adaptive 2/5/10 mm/s"
+            "8 mm/s velocity, 50 mm/s^2 acceleration/deceleration"
         )
 
     def on_joint_state(self, message: JointState) -> None:
@@ -82,7 +75,8 @@ class Motor4PositionGuard(Node):
 
         target_position = target_mm / 1000.0
         distance_mm = abs(target_position - self.measured_position) * 1000.0
-        velocity, acceleration = profile_for_distance(distance_mm)
+        velocity = REQUIRED_VELOCITY_M_S
+        acceleration = DEFAULT_ACCELERATION_M_S2
         if velocity > HARD_MAX_VELOCITY_M_S or acceleration > HARD_MAX_ACCELERATION_M_S2:
             self.get_logger().error("REJECTED Motor 4 target: internal profile exceeds hardware limits")
             return

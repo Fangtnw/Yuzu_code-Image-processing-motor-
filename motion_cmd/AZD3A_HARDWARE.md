@@ -40,7 +40,7 @@ These are temporary bring-up ports on the currently available AZD3A-KED:
 | --- | --- |
 | AZD3A slave 0, Axis 1 | Motor 1 (`AZM46AK` / `EZSM3LD040AZAK`) |
 | AZD3A slave 0, Axis 2 | Motor 2 (`AZM46AK-FC7.2UA`) |
-| AZD3A slave 0, Axis 3 | Disconnected |
+| AZD3A slave 0, Axis 3 | Motor 3, DR28T1A03-AZAKR, 10,000 counts/mm; standalone commissioning passed |
 
 This table is commissioning evidence, not the final harness assignment. When
 the remaining motors and second AZD3A-KED arrive, record an explicit mapping
@@ -68,8 +68,9 @@ WorkingCounter 3/3. The revised launch cyclically maps slave 0 through a passive
 because slave 0 Axis 3 is still recorded as disconnected.
 
 The combined GUI/backend now owns both physical AZD3A slaves: Motors 1/2 use
-slave 0 and Motor 4 uses slave 1 Axis 1. Motor 4 exposes guarded absolute
-targets from 0..15 mm with distance-adaptive 2/5/10 mm/s profiles. This removes
+slave 0 and Motor 4 uses slave 1 Axis 1. At that commissioning stage, Motor 4
+exposed guarded absolute targets from 0..15 mm with distance-adaptive 2/5/10
+mm/s profiles. This removes
 the passive-keepalive case from combined operation because both slaves have
 real cyclic PDO mappings. Runtime validation was pending at that stage.
 
@@ -127,7 +128,7 @@ setting or a software safety limit.
 | Drive pulley diameter | 30 mm | Official MISUMI SVKA catalog and calculation table |
 | Live electronic gearing | A=1, B=1 | SDO `0x7091:01/02` read from slave 1 Axis 3 |
 | Live software conversion | 500,000 drive counts/output revolution | Verified commissioning configuration; not the catalog's selectable pulse-resolution figure |
-| Current GUI speed cap | 5 output rpm | Project software safety limit, not the 60 rpm hardware maximum |
+| Current GUI speed cap | 50 output rpm / 78.54 mm/s belt speed | Project software safety limit below the 60 rpm hardware maximum |
 
 The conversions used by the Motor 6 ROS configuration are:
 
@@ -145,6 +146,70 @@ The Oriental Motor product page also lists a selectable-resolution example of
 0.0072 degrees/pulse at 1,000 P/R. That catalog pulse setting must not replace
 the live 500,000-count/output-revolution ROS conversion without a new drive
 configuration and a measured scaling test.
+
+As of 2026-09-22, Motor 6 is integrated with Motor 4 through one composite
+slave-1 configuration. Local Axis 1 remains Motor 4 CSP position and local
+Axis 3 is Motor 6 CSV velocity; this avoids two ROS hardware instances
+competing for AZD3A #2. The operator guard is now capped at 50 output rpm with
+a 2 rpm/s ramp and 0.5-second watchdog. This corresponds to approximately
+78.54 mm/s belt speed. The standalone +1 rpm physical test is validated; the
+expanded combined-GUI speed range requires staged physical validation.
+
+### Updated linear-axis motion requirements (2026-09-22)
+
+- Motor 1 required velocity is 15 mm/s. Its guarded upper position is now
+  200 mm, half of the `EZSM3LD040AZAK` 400 mm catalog stroke; the lower bound
+  remains 0.0996 mm above the provisional lower-end zero. The retained
+  acceleration/deceleration ramp is symmetric at 5 mm/s^2 because the new
+  requirement did not specify acceleration.
+- Motors 3 and 4 use 8 mm/s motion with symmetric 50 mm/s^2
+  acceleration/deceleration over guarded 0..15 mm ranges. Motor 3 is slave 0
+  Axis 3 and Motor 4 is slave 1 Axis 1. Motor 3's scaling, direction, alarm-free
+  stopping, and 2 mm round trip have been physically commissioned. The plugin
+  now supports a tertiary CiA-402 state machine, and Motor 3 is exposed through
+  the combined GUI's guarded custom position interface.
+
+Motor 3's reconnected read-only baseline is healthy: Axis alarm `0x4040:03`
+and error `0x703F` are `0x0000`, status `0x7041=0x0270`, raw position is 2,726
+counts, A=1/B=1, supported modes are `0x01A5`, and the controller alarm bitmap
+is zero. The standalone commissioning path uses 10,000 counts/mm and permits
+only startup-relative +/-0.500 mm at 2 mm/s until physical direction and
+scaling are confirmed.
+
+The first startup-relative +0.100 mm Motor 3 test moved raw feedback from 2,726
+to 3,721 counts. The 995-count change equals 0.0995 mm, and `/joint_states`
+settled at 0.0003721 m with alarm `0x0000`. Address and 10,000-count/mm scaling
+are therefore validated over this tiny positive move; physical direction and
+the reverse return still require operator confirmation.
+
+The subsequent startup-relative zero return settled at 2,730 counts, four
+counts (0.0004 mm) from the 2,726-count origin, with alarm `0x0000`. The first
+tiny round trip is electrically repeatable; physical direction and smoothness
+remain pending operator confirmation.
+
+The operator confirmed positive counts move Motor 3 in the required forward
+direction and that both directions of the 0.100 mm round trip were smooth.
+Motor 3 direction and first-stage physical behavior are validated.
+
+The subsequent +0.500 mm round trip reached 4,999 counts (0.4999 mm) forward
+and returned within two counts (0.0002 mm) of start, with alarm `0x0000`. The
+next standalone envelope is +/-2.000 mm at the required 8 mm/s and a symmetric
+50 mm/s^2 ramp so the trajectory can actually reach 8 mm/s.
+
+The +2.000 mm requirement-speed test settled 19,999 counts (1.9999 mm) above
+start and returned within two counts (0.0002 mm), with alarm `0x0000`. Motor 3
+scaling and repeatability are validated with the configured 8 mm/s and
+50 mm/s^2 motion profile; physical smoothness at this speed awaits operator
+confirmation.
+
+The operator confirmed that the 2 mm requirement-speed round trip was smooth.
+Motor 3 standalone commissioning is complete at 8 mm/s and 50 mm/s^2 with no
+alarm. The CiA-402 plugin now includes a tertiary state machine at object offset
+`0x1000`; the combined backend and GUI map it through the custom
+`motor3_position` interface. Software integration is complete, while the first
+combined physical test also passed: 0.2732 mm to 0.3727 mm, followed by an
+alarm-free return to absolute zero. The operator confirmed smooth motion in the
+required forward direction.
 
 ## Machine sequence sources
 

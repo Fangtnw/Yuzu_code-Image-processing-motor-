@@ -1,4 +1,4 @@
-"""Run Motors 1, 2, 4, and 6 across two AZD3A slaves with the operator GUI."""
+"""Run Motors 1 through 6 across two AZD3A slaves with the operator GUI."""
 
 from pathlib import Path
 
@@ -60,7 +60,19 @@ def generate_launch_description() -> LaunchDescription:
         Node(
             package="controller_manager",
             executable="spawner",
+            arguments=["motor3_raw_position_controller", "-c", "/controller_manager"],
+            output="screen",
+        ),
+        Node(
+            package="controller_manager",
+            executable="spawner",
             arguments=["motor6_raw_velocity_controller", "-c", "/controller_manager"],
+            output="screen",
+        ),
+        Node(
+            package="controller_manager",
+            executable="spawner",
+            arguments=["motor5_raw_position_controller", "-c", "/controller_manager"],
             output="screen",
         ),
         Node(
@@ -69,8 +81,8 @@ def generate_launch_description() -> LaunchDescription:
             parameters=[{
                 "feedback_joint_name": "motor1_motor2",
                 "min_position_m": 0.0000996,
-                "max_position_m": 0.005,
-                "max_velocity_m_s": 0.002,
+                "max_position_m": 0.200,
+                "max_velocity_m_s": 0.015,
                 "max_acceleration_m_s2": 0.005,
             }],
             output="screen",
@@ -92,12 +104,22 @@ def generate_launch_description() -> LaunchDescription:
         ),
         Node(
             package="motor_controller",
+            executable="azd3a_motor3_position_guard",
+            output="screen",
+        ),
+        Node(
+            package="motor_controller",
             executable="azd3a_motor6_conveyor_guard",
             parameters=[{
-                "max_rpm": 5.0,
+                "max_rpm": 50.0,
                 "max_acceleration_rpm_s": 2.0,
                 "command_timeout_s": 0.5,
             }],
+            output="screen",
+        ),
+        Node(
+            package="motor_controller",
+            executable="azd3a_motor5_position_guard",
             output="screen",
         ),
         Node(

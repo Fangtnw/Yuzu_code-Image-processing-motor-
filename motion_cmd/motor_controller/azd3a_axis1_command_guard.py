@@ -17,11 +17,12 @@ HARD_MAX_VELOCITY_M_S = 0.600
 HARD_MAX_ACCELERATION_M_S2 = 0.2
 MIN_TRAVEL_INCREMENT_M = 0.0000012
 
-# Conservative commissioning defaults. Launch parameters may relax them only
-# within the manufacturer envelope above.
+# Requirement-based assembled-machine defaults. The 200 mm upper bound is half
+# of the 400 mm actuator stroke; launch parameters may change these only within
+# the manufacturer envelope above.
 DEFAULT_MIN_POSITION_M = 0.0000996
-DEFAULT_MAX_POSITION_M = 0.005
-DEFAULT_MAX_VELOCITY_M_S = 0.002
+DEFAULT_MAX_POSITION_M = 0.200
+DEFAULT_MAX_VELOCITY_M_S = 0.015
 DEFAULT_MAX_ACCELERATION_M_S2 = 0.005
 UPDATE_RATE_HZ = 200.0
 PUBLIC_TOPIC = "/axis1_position_controller/commands"

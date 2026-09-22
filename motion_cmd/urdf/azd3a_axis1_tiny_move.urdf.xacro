@@ -29,7 +29,7 @@
       <command_interface name="position">
         <!-- Keep 0.0996 mm clearance from provisional lower-end zero. -->
         <param name="min">0.0000996</param>
-        <param name="max">0.005</param>
+        <param name="max">0.200</param>
       </command_interface>
       <state_interface name="position"/>
 

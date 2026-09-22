@@ -880,6 +880,10 @@ until the source sequence drawing is revised.
 
 ## Initial Yuzu operator GUI
 
+This subsection records the initial Motors 1/2 implementation. It is retained
+as history; the current Motors 1/2/4/6 state is recorded in the 2026-09-22
+session closeout below and in `motion_cmd/YUZU_OPERATOR_GUI.md`.
+
 A Tkinter/ROS 2 operator panel is available as `yuzu_operator_gui`. It provides
 Motor 1 position and safe-park controls, Motor 2 guarded CW/CCW RPM and stop
 controls, live feedback, backend availability, count alignment, and stale-data
@@ -894,8 +898,8 @@ position and velocity controllers and both existing guards. The launch
 sequence can command Motor 1 and Motor 2 step by step without restarting or
 competing for EtherCAT ownership. GUI usage is documented in
 `motion_cmd/YUZU_OPERATOR_GUI.md`. Software build, xacro expansion, launch
-loading, 17 repository tests, and the 50-test driver suite pass; live combined
-hardware validation is the next step.
+loading, 17 repository tests, and the 50-test driver suite passed at that
+stage; live combined hardware validation was the next step at that time.
 
 The single after-reboot and troubleshooting reference is now:
 
@@ -908,3 +912,248 @@ NIC/slave checks, ROS environment sourcing, axis-specific alarm/status/position
 reads, alarm reset sequence, known `0xFF34` diagnosis, and common recovery
 commands. The EtherCAT master must be started after Ubuntu boots before any ROS
 motor launch.
+
+## Session closeout: Motor 6 conveyor and combined GUI (2026-09-22)
+
+Motor 6 is confirmed as Oriental Motor `AZM46AK-PS50`, connected to AZD3A #2
+(EtherCAT slave 1), local Axis 3, and driving the MISUMI
+`SVKA-150-795-25-NV-NM-NH-W-R-...` conveyor. The researched motor/conveyor
+specifications, provenance, scaling calculations, and physical measurements
+are recorded in `motion_cmd/AZD3A_HARDWARE.md`. The official MISUMI catalog is
+archived at `vendor/misumi/SVKA_catalog_2019_pages_1254-1255.pdf`; its source,
+retrieval date, and SHA-256 are recorded in `vendor/misumi/README.md`.
+
+The first guarded Motor 6 test at +1 output rpm moved the conveyor smoothly in
+the operator-confirmed forward direction. Raw position increased from
+2,280,574 to 2,358,024 counts (77,450 counts, 0.1549 output revolution, about
+14.6 mm belt travel). The timed command stopped normally, feedback velocity
+returned to zero, and Axis 3 alarm remained `0x0000`.
+
+Motor 6 is now included in the combined Motors 1/2/4/6 operator GUI. AZD3A #2
+uses one composite mapping for Motor 4 Axis 1 CSP and Motor 6 Axis 3 CSV, so
+only one hardware instance owns the slave. The GUI provides forward/reverse,
+start/stop, live RPM and calculated belt speed, plus a global Motor 2/Motor 6
+stop. Motor 6 is guarded to 5 output rpm, ramps at 2 rpm/s, and retains the
+0.5-second watchdog. At 5 rpm the calculated belt speed is about 7.85 mm/s.
+
+Software closeout passed: 21 repository tests, Python syntax checks, combined
+xacro/XML expansion, `motor_controller` package build, and installed launch
+description loading. The next session should physically validate the combined
+Motor 6 GUI path at 2 rpm first, then 5 rpm if motion remains smooth. Motors 1,
+2, and 4 were already physically validated through the combined GUI. Motor 3
+remains disconnected.
+
+## Updated linear motion requirements and GUI details (2026-09-22)
+
+The detailed requirements now set Motor 1 velocity to 15 mm/s and Motors 3/4
+velocity to 8 mm/s. Motor 1's guarded travel was expanded from 5 mm to 200 mm,
+which is half of the `EZSM3LD040AZAK` 400 mm catalog stroke. Its lower bound
+remains 0.0996 mm above the provisional lower-end zero. Because no new
+acceleration/deceleration values were supplied, Motor 1 retains a symmetric
+5 mm/s^2 software ramp.
+
+Motor 4 now uses a fixed 8 mm/s profile over its existing guarded 0..15 mm
+range, with the retained symmetric 50 mm/s^2 ramp. Motor 3's 8 mm/s requirement
+is recorded but its controls remain disabled because Motor 3 is physically
+disconnected and its scaling, travel, direction, acceleration, and deceleration
+are not yet commissioned.
+
+The operator GUI now includes a collapsible read-only **Motion details** table
+showing range, velocity, acceleration, and deceleration for Motors 1, 2, 3, 4,
+and 6. This exposes the actual guard values without allowing operators to
+bypass them. Software validation after this update passed 21 repository tests,
+Python syntax checks, combined xacro/XML expansion, and the ROS workspace
+package build.
+Physical validation should begin with short Motor 1 and Motor 4 moves before
+using the expanded travel.
+
+## Motor 6 50 rpm request and Motor 3 reconnection (2026-09-22)
+
+Motor 6's guarded maximum was increased from 5 to 50 gearbox-output rpm, still
+below the `AZM46AK-PS50` catalog maximum of 60 rpm. For the conveyor operator,
+linear belt speed is more meaningful than shaft rpm. The GUI now accepts mm/s
+and converts internally using the verified 30 mm pulley: 50 rpm equals
+78.5398 mm/s. The backend remains RPM-based because CSV scaling controls the
+gearbox output. The existing symmetric 2 rpm/s ramp and 0.5-second watchdog are
+retained; staged physical validation must begin at the GUI's 10 mm/s default.
+
+Motor 3 is reported physically reconnected on AZD3A #1/slave 0 Axis 3. It is
+not yet enabled in the GUI. Live alarm, status, position, electronic gearing,
+and supported-mode reads are required first. Source inspection also confirmed
+that the current composite CiA-402 plugin supports only a primary and one
+secondary state machine per slave; slave 0 already uses those for Motors 1 and
+2. A third-axis extension is therefore required to add Motor 3 without
+competing for the physical slave or abusing an unrelated ROS command
+interface.
+
+The Motor 3 live read-only check then passed: Axis alarm and CiA-402 error were
+`0x0000`, stopped status was `0x0270`, raw position was 2,726 counts,
+electronic gearing was A=1/B=1, supported modes were `0x01A5`, and the
+controller alarm bitmap was zero. A standalone guarded commissioning launch
+was added for slave 0 Axis 3 CSP with the confirmed 10,000 counts/mm scaling.
+It holds slave 1 in a passive non-enabled keepalive and limits initial Motor 3
+motion to startup-relative +/-0.500 mm at 2 mm/s. Software validation passed
+22 repository tests, Python syntax, xacro/XML expansion, and ROS package build.
+
+The first Motor 3 guarded motion test commanded a startup-relative +0.100 mm.
+Raw position changed from 2,726 to 3,721 counts, a measured increase of 995
+counts or 0.0995 mm at 10,000 counts/mm. `/joint_states` settled at
+0.0003721 m and Axis 3 alarm remained `0x0000`. This validates the address,
+positive count scaling, and commanded/measured convergence for the first tiny
+move. Physical direction, smoothness, and return-to-origin remain to be
+confirmed before raising speed to the 8 mm/s requirement or enabling Motor 3
+in the combined GUI.
+
+The startup-relative 0.000 mm return then settled at raw 2,730 counts
+(`0.0002730 m`), only four counts or 0.0004 mm from the captured 2,726-count
+origin. Alarm remained `0x0000`. This confirms repeatable bidirectional
+command/feedback behavior over the first 0.100 mm. Operator confirmation of
+physical direction and smoothness is still required before the 0.500 mm and
+8 mm/s stages.
+
+The operator then confirmed that positive Motor 3 motion is the required
+forward direction and that both directions were smooth with no unusual sound.
+Direction, tiny-motion scaling, alarm-free stopping, and first-round-trip
+repeatability are therefore validated. The next commissioning stage is a
++0.500 mm round trip at the current 2 mm/s guard speed.
+
+The +0.500 mm stage then passed: feedback reached 0.0007729 m, corresponding
+to 4,999 counts (0.4999 mm) above the approximate 2,730-count start. The zero
+return settled at 0.0002732 m / 2,732 counts, about two counts (0.0002 mm) from
+start, and alarm remained `0x0000`. The standalone next-stage guard is expanded
+to +/-2.000 mm at the required 8 mm/s with a symmetric 50 mm/s^2 ramp; a 2 mm
+move is long enough to reach the requested velocity before deceleration.
+
+The Motor 3 requirement-speed round trip then passed. The +2.000 mm command
+settled at 0.0022729 m, which is 19,999 counts / 1.9999 mm above the captured
+approximately 2,730-count origin. The zero return settled at 0.0002732 m and
+raw 2,732 counts, within about two counts / 0.0002 mm of start. Alarm remained
+`0x0000`. This validates commanded/measured convergence and return
+repeatability using the configured 8 mm/s, 50 mm/s^2 trajectory; operator
+confirmation of physical smoothness at the higher speed remains pending.
+
+The operator confirmed the 2 mm forward-and-return movement was physically
+smooth at the configured 8 mm/s. Motor 3 standalone commissioning is complete:
+connection, alarm state, A/B gearing, 10,000 counts/mm scaling, positive
+direction, bidirectional repeatability, 8 mm/s speed, 50 mm/s^2 ramps, and
+alarm-free stopping are validated. Motor 3 is ready for the third-state-machine
+driver extension and combined-GUI integration.
+
+## Motor 3 combined GUI integration (2026-09-22)
+
+Motor 3 is now integrated into the normal two-controller GUI launch. The
+EtherCAT CiA-402 plugin was extended with a third independent state machine for
+slave 0 Axis 3 (object offset `0x1000`, CSP mode 8). The combined PDO map adds
+`0x1620`/`0x1A20`, and ros2_control exposes a separate custom
+`motor3_position` command/state interface without duplicating the physical
+slave. A forward-command controller and feedback-synchronized absolute guard
+provide a public 0..15 mm interface with 0.001 mm increments, 8 mm/s velocity,
+and symmetric 50 mm/s^2 ramps.
+
+The GUI Motor 3 panel is unlocked and reads its feedback from
+`/dynamic_joint_states`. Its Move/Return buttons remain disabled unless the
+guarded backend is subscribed. The guard follows measured Motor 3 feedback
+until the first operator command, preventing a stale startup target.
+
+Validation completed without issuing hardware motion: both modified ROS
+packages compiled; the combined xacro and launch arguments loaded; all 23
+repository tests passed; and the EtherCAT driver reported 51 test results with
+zero errors/failures (including a new tertiary-axis state/mode/position-hold
+regression test). Combined hardware validation is still pending and must start
+by confirming live `motor3_position` feedback and `0x707A == 0x7064`, followed
+by only a +0.100 mm absolute move from the observed starting position.
+
+The first combined-GUI Motor 3 motion test passed. Starting feedback was
+0.0002732 m / 2,732 counts, with target and actual differing by one count and
+alarm `0x0000`. A GUI target of 0.373 mm settled at 0.0003727 m / 3,727 counts
+against a 3,730-count target, a following difference of three counts
+(0.0003 mm), with alarm still `0x0000`. The GUI Return to 0 mm action then
+settled at exactly 0.0000000 m / 0 counts with alarm `0x0000`. This validates
+the combined custom interface, GUI command path, absolute-zero return, and
+command/feedback convergence. The operator confirmed that the physical motion
+was smooth and the positive move travelled in the required forward direction.
+Combined Motor 3 GUI commissioning is therefore complete.
+
+## Motor 5 rewiring and isolated commissioning path (2026-09-22)
+
+Motor 5, the previously tested `AZM46AK-FC20DA`, is now wired to AZD3A #2
+(slave 1) Axis 2. Its read-only baseline passed with both slaves OP, Axis 2
+alarm `0x0000`, CiA-402 error `0x0000`, stopped status `0x0270`, raw absolute
+position -529,442 counts, A/B gearing 1:1, and supported modes `0x01A5`.
+
+An isolated commissioning launch now maps Axis 2 PDOs `0x1610`/`0x1A11` using
+the validated 200,000 counts/output-revolution FC20DA scaling. Slave 0 receives
+a passive, non-enabling cyclic keepalive. The Motor 5 guard captures live
+position as its origin and permits only a startup-relative 0..1 degree command
+at 1 rpm with a 5 rpm/s ramp, preventing any jump toward the multi-turn ABZO
+absolute zero. Syntax, xacro, launch loading, package build, and all 24 project
+tests passed. Physical +1 degree and return tests remain pending.
+
+The first isolated Motor 5 round trip passed electronically. The guarded +1
+degree command moved from -529,442 to -528,886 counts, a +556-count change
+equal to approximately +1.0008 degrees. Target and actual matched, final
+velocity was zero, and alarm remained `0x0000`. The startup-relative zero
+return settled at -529,441 counts, one count / approximately 0.0018 degrees
+from the captured origin, again with zero final velocity and no alarm. Physical
+motion was smooth in both directions and that positive rotation is the required
+Motor 5 positioning direction. The next commissioning guard is expanded to
+startup-relative +/-10 degrees at 5 rpm with a 5 rpm/s ramp. The eventual GUI
+will expose explicit CW/CCW selection and publish a signed angle, allowing the
+operator to reverse direction without changing wiring.
+
+The Motor 5 +10-degree stage then passed. Target and actual both settled at
+-523,882 counts, approximately +10.006 degrees from the prior origin, with
+zero final velocity and alarm `0x0000`. Return settled at -529,437 counts,
+four counts / approximately 0.0072 degrees from origin, again alarm-free. The
+operator confirmed smooth physical movement.
+
+Motor 5 is now software-integrated into the combined all-six-motor launch.
+Slave 1 Axis 2 uses PDOs `0x1610`/`0x1A11` and the custom `motor5_position`
+interface alongside Motor 4 (Axis 1) and Motor 6 (Axis 3). The GUI requires the
+operator to press **Set current position as zero** after every launch before
+angle controls unlock. It then accepts 0..90 degrees with explicit CW (+) and
+CCW (-) selection and provides Return to Origin. The guard rejects motion
+before zero capture and uses the validated 5 rpm, 5 rpm/s profile. All 25
+project tests, Python syntax, combined xacro expansion, package build, and
+launch loading passed. Combined startup and 90-degree physical validation are
+pending.
+
+The first combined startup check exposed a software-only interface ownership
+error before any Motor 5 motion: `motor5_position` appeared under the slave 0
+composite joint, leaving `motor5_raw_position_controller` inactive. Slave 1
+Axis 2 remained non-enabled (mode/output bytes zero), its alarm remained
+`0x0000`, and actual position stayed near -529,435 counts, so no unintended
+motion occurred. The xacro was corrected so `motor5_position` and the tertiary
+offset `0x0800` belong to slave 1's `motor4_joint` module. A structural
+regression assertion now verifies this ownership. All 25 tests, xacro
+expansion, and the package rebuild pass after the correction.
+
+The next corrected combined startup showed Motor 5's controller active but
+reported custom dynamic feedback as `0.0` while SDO actual position was
+`-529435`. No movement occurred: Axis 2 target remained zero, alarm was
+`0x0000`, and the drive stayed at its prior position. Inspection found the
+combined `0x1A11` mapping omitted Axis 2's mapped velocity entry `0x686C`,
+despite the domain reporting the full 11-byte PDO. That entry is now included
+as an unexported state channel. The launch must be restarted and dynamic
+feedback must match `0x6864` before the GUI runtime-zero button is used.
+
+After a clean restart, temporary driver instrumentation confirmed both
+tertiary channels: Motor 3 stored `3e-07 m` at state index 2 and Motor 5
+stored `-16.6327 rad` at state index 2, exactly matching their TPDO values.
+The instrumentation was removed and the driver rebuilt. The GUI now includes
+`<`/`>` target nudges for Motors 1, 3, 4, and 5; these change the numeric field
+only, while the existing Move button remains required to publish a command.
+Motor 5's nudge is 1 degree and remains gated behind runtime-zero capture.
+
+The operator clarified that `<` and `>` must command motion immediately. The
+GUI implementation now provides per-motor step-size fields and publishes a
+guarded command on each arrow press; typed targets, Move, and Return controls
+remain available. Motors 1/3/4 step in millimetres and Motor 5 steps in
+degrees, with Motor 5 still requiring the manually established runtime origin.
+All 25 project tests and the GUI package rebuild pass.
+
+Final combined all-six feedback check passed after the clean restart. Dynamic
+state reported Motor 3 at `0.0005126 m`, Motor 4 at `0.0005128 m`, and Motor 5
+at `-16.457987 rad` with live velocity feedback `0.0012315 rad/s`. This
+confirms the corrected custom Motor 5 state path is live alongside Motors 1,
+3, 4, and 6. Further GUI polish is intentionally deferred to the next session.

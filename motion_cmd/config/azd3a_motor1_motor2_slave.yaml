@@ -16,6 +16,11 @@ rpdo:
       - {index: 0x6840, sub_index: 0, type: uint16, default: 0}
       - {index: 0x68ff, sub_index: 0, type: int32, command_interface: velocity, factor: 11459.155902616465, default: 0}
       - {index: 0x6860, sub_index: 0, type: int8, default: 9}
+  - index: 0x1620
+    channels:
+      - {index: 0x7040, sub_index: 0, type: uint16, default: 0}
+      - {index: 0x707a, sub_index: 0, type: int32, command_interface: motor3_position, factor: 10000000.0, default: .nan}
+      - {index: 0x7060, sub_index: 0, type: int8, default: 8}
 
 tpdo:
   - index: 0x1a00
@@ -29,3 +34,8 @@ tpdo:
       - {index: 0x6864, sub_index: 0, type: int32}
       - {index: 0x686c, sub_index: 0, type: int32, state_interface: velocity, factor: 0.00008726646259971647}
       - {index: 0x6861, sub_index: 0, type: int8}
+  - index: 0x1a20
+    channels:
+      - {index: 0x7041, sub_index: 0, type: uint16}
+      - {index: 0x7064, sub_index: 0, type: int32, state_interface: motor3_position, factor: 0.0000001}
+      - {index: 0x7061, sub_index: 0, type: int8}

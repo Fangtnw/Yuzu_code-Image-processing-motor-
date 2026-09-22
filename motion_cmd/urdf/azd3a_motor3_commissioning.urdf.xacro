@@ -1,0 +1,52 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="azd3a_motor3_commissioning">
+  <link name="base_link"/>
+  <link name="motor3_table"/>
+  <link name="slave1_keepalive_table"/>
+
+  <joint name="motor3_joint" type="prismatic">
+    <parent link="base_link"/>
+    <child link="motor3_table"/>
+    <axis xyz="1 0 0"/>
+    <limit lower="-0.030" upper="0.030" velocity="0.008" effort="10.0"/>
+  </joint>
+  <joint name="slave1_keepalive_joint" type="prismatic">
+    <parent link="base_link"/>
+    <child link="slave1_keepalive_table"/>
+    <axis xyz="0 1 0"/>
+    <limit lower="-1.0" upper="1.0" velocity="1.0" effort="1.0"/>
+  </joint>
+
+  <ros2_control name="AZD3A_motor3_commissioning" type="system">
+    <hardware>
+      <plugin>ethercat_driver/EthercatDriver</plugin>
+      <param name="master_id">0</param>
+      <param name="control_frequency">200</param>
+      <param name="number_of_physical_drives">2</param>
+    </hardware>
+
+    <joint name="motor3_joint">
+      <command_interface name="position"/>
+      <state_interface name="position"/>
+      <ec_module name="azd3a_slave0_axis3_motor3">
+        <plugin>ethercat_generic_plugins/EcCiA402Drive</plugin>
+        <param name="alias">0</param>
+        <param name="position">0</param>
+        <param name="cia402_object_index_offset">0x1000</param>
+        <param name="position_startup_tolerance">0.0000001</param>
+        <param name="mode_of_operation">8</param>
+        <param name="slave_config">$(find motor_controller)/config/azd3a_motor3_commissioning_slave.yaml</param>
+      </ec_module>
+    </joint>
+
+    <joint name="slave1_keepalive_joint">
+      <state_interface name="position"/>
+      <ec_module name="azd3a_slave1_passive_keepalive">
+        <plugin>ethercat_generic_plugins/GenericEcSlave</plugin>
+        <param name="alias">0</param>
+        <param name="position">1</param>
+        <param name="slave_config">$(find motor_controller)/config/azd3a_slave1_passive_keepalive.yaml</param>
+      </ec_module>
+    </joint>
+  </ros2_control>
+</robot>

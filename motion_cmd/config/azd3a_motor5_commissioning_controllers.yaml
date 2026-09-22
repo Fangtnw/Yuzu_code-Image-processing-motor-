@@ -1,0 +1,12 @@
+controller_manager:
+  ros__parameters:
+    update_rate: 200
+    joint_state_broadcaster:
+      type: joint_state_broadcaster/JointStateBroadcaster
+    motor5_raw_position_controller:
+      type: position_controllers/JointGroupPositionController
+
+motor5_raw_position_controller:
+  ros__parameters:
+    joints:
+      - motor5_joint

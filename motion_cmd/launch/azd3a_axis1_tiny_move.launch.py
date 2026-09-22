@@ -53,11 +53,11 @@ def generate_launch_description() -> LaunchDescription:
             {
                 # Provisional machine coordinates: the captured lower end is
                 # zero and positive ROS motion is upward. Keep the first
-                # assembled-machine envelope intentionally small.
+                # assembled-machine envelope to half the actuator stroke.
                 # Never command the captured mechanical-end coordinate itself.
                 "min_position_m": 0.0000996,
-                "max_position_m": 0.005,
-                "max_velocity_m_s": 0.002,
+                "max_position_m": 0.200,
+                "max_velocity_m_s": 0.015,
                 "max_acceleration_m_s2": 0.005,
             }
         ],

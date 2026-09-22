@@ -10,7 +10,7 @@ from std_msgs.msg import Float64MultiArray
 PUBLIC_TOPIC = "/motor6_conveyor/commands_rpm"
 RAW_TOPIC = "/motor6_raw_velocity_controller/commands"
 HARD_MAX_RPM = 60.0
-COMMISSIONING_MAX_RPM = 5.0
+COMMISSIONING_MAX_RPM = 50.0
 DEFAULT_ACCELERATION_RPM_S = 2.0
 COMMAND_TIMEOUT_S = 0.5
 UPDATE_PERIOD_S = 0.005

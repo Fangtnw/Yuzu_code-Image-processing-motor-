@@ -1,5 +1,15 @@
 # Axis 1 Next Steps Plan
 
+> **Historical plan — superseded as of 2026-09-22.** Axis 1 bring-up and the
+> staged Axis 2/3 work described here were completed and expanded into the
+> final two-controller wiring. The current combined GUI controls logical
+> Motors 1 through 6 are now part of the combined GUI launch. Motor 5 requires
+> an operator-set runtime origin before its angle controls unlock.
+> Use `progress.md`, `motion_cmd/AZD3A_HARDWARE.md`, and
+> `motion_cmd/YUZU_OPERATOR_GUI.md` for current status and commands. The
+> unchecked items below are retained as the original commissioning record,
+> not as the current work queue.
+
 > **For Ubuntu Codex:** Read this after `progress.md` and
 > `motion_cmd/AZD3A_HARDWARE.md`. The goal is to make Axis 1 repeatable,
 > measured, and safe before adding Axis 2 or Axis 3.

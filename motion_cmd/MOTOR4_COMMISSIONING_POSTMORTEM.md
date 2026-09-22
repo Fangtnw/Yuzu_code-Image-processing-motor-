@@ -85,7 +85,7 @@ in `azd3a_motor4_position_guard.py`, which continuously follows valid feedback
 before the first operator command and rejects commands until feedback exists.
 It also enforces absolute positions from 0 to 15 mm in 0.001 mm increments.
 
-Motor 4 speed is distance-adaptive and remains below the actuator's catalog
+At the time of this incident, Motor 4 speed was distance-adaptive and remained below the actuator's catalog
 limits:
 
 - moves through 1 mm: 2 mm/s, 0.020 m/s²;
@@ -142,7 +142,8 @@ not covered by this validation.
 
 - Capture Motor 4 `0x607A`, `0x6064`, and `/joint_states` at several GUI
   targets up to 15 mm as the assembled mechanism is cleared for travel.
-- Connect and commission Motor 3 on slave 0 Axis 3 before adding it to the GUI.
+- Motor 3 has since been reconnected on slave 0 Axis 3; complete read-only
+  verification and third-state-machine driver integration before enabling it.
 - Add a runtime/integration test for two physical EtherCAT slaves; static tests
   cannot reproduce SyncManager watchdogs or CSP startup ordering.
 - Replace chain-position addressing with persistent EtherCAT aliases if the
