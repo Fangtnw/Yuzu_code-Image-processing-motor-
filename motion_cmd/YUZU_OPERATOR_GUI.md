@@ -10,17 +10,17 @@ raw ros2_control topics.
   emergency stop; keep the physical power cutoff accessible.
 - Motor 1 is limited to 0.0996..200 mm above its provisional lower-end zero
   (half of the 400 mm actuator stroke). Its required velocity is 15 mm/s with
-  the retained symmetric 5 mm/s^2 software acceleration/deceleration ramp.
+  a symmetric 15 mm/s^2 software acceleration/deceleration ramp.
 - Motor 2 is limited to its validated 250 rpm machine requirement.
 - Motors 3 and 4 are limited to 0..15 mm in 0.001 mm increments. Both use the
   required 8 mm/s velocity and symmetric 50 mm/s^2 software ramps. Motor 3 uses
   the custom `motor3_position` interface on slave 0 Axis 3.
-- Motor 6 is limited to +/-50 output rpm with a 2 rpm/s ramp and a 0.5-second
+- Motor 6 is limited to +/-50 output rpm with a 25 rpm/s ramp and a 0.5-second
   watchdog. Positive RPM is the physically verified forward conveyor
   direction. The GUI accepts the operator command in belt mm/s: 50 rpm on the
   verified 30 mm pulley equals approximately 78.54 mm/s.
 - Motor 5 is limited to +/-90 degrees from an operator-defined runtime origin,
-  at 5 rpm with a symmetric 5 rpm/s ramp. Its CW/CCW motion buttons remain
+  at 20 rpm with a symmetric 20 rpm/s ramp. Its CW/CCW motion buttons remain
   locked until **Set current position as zero** is pressed after each launch.
 - The combined launch owns each AZD3A slave once and operates Motors 1, 2, and
   3 through separate guarded interfaces on slave 0. Slave 1 similarly combines
@@ -86,7 +86,7 @@ Full engineering record: `MOTOR4_COMMISSIONING_POSTMORTEM.md`.
 - Motor 6 standalone commissioning passed at +1 output rpm: smooth forward
   motion, watchdog stop, zero final velocity, and no drive alarm.
 - Motor 6 is now software-integrated into the combined GUI with a 50 rpm
-  (78.54 mm/s) guard, 2 rpm/s ramp, live RPM/belt-speed display, and global
+  (78.54 mm/s) guard, 25 rpm/s ramp, live RPM/belt-speed display, and global
   rotary stop.
 - The combined Motor 6 GUI path and expanded speed range have passed software
   tests and build/launch loading, but still require staged physical validation.

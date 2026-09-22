@@ -83,7 +83,7 @@ def generate_launch_description() -> LaunchDescription:
                 "min_position_m": 0.0000996,
                 "max_position_m": 0.200,
                 "max_velocity_m_s": 0.015,
-                "max_acceleration_m_s2": 0.005,
+                "max_acceleration_m_s2": 0.015,
             }],
             output="screen",
         ),
@@ -112,7 +112,7 @@ def generate_launch_description() -> LaunchDescription:
             executable="azd3a_motor6_conveyor_guard",
             parameters=[{
                 "max_rpm": 50.0,
-                "max_acceleration_rpm_s": 2.0,
+                "max_acceleration_rpm_s": 25.0,
                 "command_timeout_s": 0.5,
             }],
             output="screen",

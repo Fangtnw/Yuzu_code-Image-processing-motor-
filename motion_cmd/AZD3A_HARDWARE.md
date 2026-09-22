@@ -160,8 +160,8 @@ expanded combined-GUI speed range requires staged physical validation.
 - Motor 1 required velocity is 15 mm/s. Its guarded upper position is now
   200 mm, half of the `EZSM3LD040AZAK` 400 mm catalog stroke; the lower bound
   remains 0.0996 mm above the provisional lower-end zero. The retained
-  acceleration/deceleration ramp is symmetric at 5 mm/s^2 because the new
-  requirement did not specify acceleration.
+acceleration/deceleration ramp is symmetric at 15 mm/s^2 for the 15 mm/s
+operating speed.
 - Motors 3 and 4 use 8 mm/s motion with symmetric 50 mm/s^2
   acceleration/deceleration over guarded 0..15 mm ranges. Motor 3 is slave 0
   Axis 3 and Motor 4 is slave 1 Axis 1. Motor 3's scaling, direction, alarm-free

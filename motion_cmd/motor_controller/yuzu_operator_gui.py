@@ -23,7 +23,7 @@ AXIS1_MAX_MM = 200.0
 AXIS1_INCREMENT_MM = 0.0012
 AXIS1_PARK_MM = 0.0996
 AXIS1_VELOCITY_MM_S = 15.0
-AXIS1_ACCELERATION_MM_S2 = 5.0
+AXIS1_ACCELERATION_MM_S2 = 15.0
 AXIS2_GUI_MAX_RPM = 250.0
 AXIS2_ACCELERATION_RPM_S = 25.0
 MOTOR4_MIN_MM = 0.0
@@ -36,10 +36,10 @@ MOTOR3_4_VELOCITY_MM_S = 8.0
 MOTOR3_ACCELERATION_MM_S2 = 50.0
 MOTOR4_ACCELERATION_MM_S2 = 50.0
 MOTOR5_MAX_ANGLE_DEG = 90.0
-MOTOR5_VELOCITY_RPM = 5.0
-MOTOR5_ACCELERATION_RPM_S = 5.0
+MOTOR5_VELOCITY_RPM = 20.0
+MOTOR5_ACCELERATION_RPM_S = 20.0
 MOTOR6_GUI_MAX_RPM = 50.0
-MOTOR6_ACCELERATION_RPM_S = 2.0
+MOTOR6_ACCELERATION_RPM_S = 25.0
 MOTOR6_PULLEY_DIAMETER_MM = 30.0
 MOTOR6_GUI_MAX_MM_S = MOTOR6_GUI_MAX_RPM * math.pi * MOTOR6_PULLEY_DIAMETER_MM / 60.0
 FEEDBACK_STALE_S = 2.0
@@ -404,7 +404,7 @@ class YuzuOperatorGui:
         frame = ttk.LabelFrame(parent, text="Motor 5 — Peeler index", padding=12)
         frame.grid(row=0, column=4, sticky="nsew", padx=(6, 0))
         ttk.Label(frame, text="Set zero before commanding ±90°").pack(anchor="w")
-        ttk.Label(frame, text="Guarded speed: 5 rpm").pack(anchor="w")
+        ttk.Label(frame, text="Guarded speed: 20 rpm").pack(anchor="w")
         self.motor5_feedback = tk.StringVar(value="Feedback: —")
         ttk.Label(frame, textvariable=self.motor5_feedback, style="Status.TLabel").pack(
             anchor="w", pady=(10, 8)

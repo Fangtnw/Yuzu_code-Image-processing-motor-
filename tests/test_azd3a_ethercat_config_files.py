@@ -203,7 +203,7 @@ class Azd3aEthercatConfigFileTests(unittest.TestCase):
         self.assertIn("AXIS1_MAX_MM = 200.0", text)
         self.assertIn("AXIS1_INCREMENT_MM = 0.0012", text)
         self.assertIn("AXIS1_VELOCITY_MM_S = 15.0", text)
-        self.assertIn("AXIS1_ACCELERATION_MM_S2 = 5.0", text)
+        self.assertIn("AXIS1_ACCELERATION_MM_S2 = 15.0", text)
         self.assertIn("AXIS2_GUI_MAX_RPM = 250.0", text)
         self.assertIn("MOTOR4_MIN_MM = 0.0", text)
         self.assertIn("MOTOR4_MAX_MM = 15.0", text)
@@ -339,7 +339,7 @@ class Azd3aEthercatConfigFileTests(unittest.TestCase):
         for expected in (
             "HARD_MAX_RPM = 60.0",
             "COMMISSIONING_MAX_RPM = 50.0",
-            "DEFAULT_ACCELERATION_RPM_S = 2.0",
+            "DEFAULT_ACCELERATION_RPM_S = 25.0",
             "COMMAND_TIMEOUT_S = 0.5",
             'PUBLIC_TOPIC = "/motor6_conveyor/commands_rpm"',
             'RAW_TOPIC = "/motor6_raw_velocity_controller/commands"',
@@ -371,8 +371,8 @@ class Azd3aEthercatConfigFileTests(unittest.TestCase):
             'SET_ZERO_TOPIC = "/motor5_position_controller/set_zero"',
             'INTERFACE_NAME = "motor5_position"',
             "MAX_ANGLE_DEG = 90.0",
-            "MAX_VELOCITY_RPM = 5.0",
-            "MAX_ACCELERATION_RPM_S = 5.0",
+            "MAX_VELOCITY_RPM = 20.0",
+            "MAX_ACCELERATION_RPM_S = 20.0",
             "self.origin = None",
             "self.origin = self.measured_position",
             "set the runtime zero first",
@@ -406,7 +406,7 @@ class Azd3aEthercatConfigFileTests(unittest.TestCase):
         self.assertIn('"min_position_m": 0.0000996', launch_text)
         self.assertIn('"max_position_m": 0.200', launch_text)
         self.assertIn('"max_velocity_m_s": 0.015', launch_text)
-        self.assertIn('"max_acceleration_m_s2": 0.005', launch_text)
+        self.assertIn('"max_acceleration_m_s2": 0.015', launch_text)
         self.assertIn("position_startup_tolerance\">0.00001", xacro_text)
 
     def test_motor4_commissioning_is_slave1_relative_and_tightly_bounded(self):

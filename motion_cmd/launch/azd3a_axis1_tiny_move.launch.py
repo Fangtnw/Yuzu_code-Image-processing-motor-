@@ -58,7 +58,7 @@ def generate_launch_description() -> LaunchDescription:
                 "min_position_m": 0.0000996,
                 "max_position_m": 0.200,
                 "max_velocity_m_s": 0.015,
-                "max_acceleration_m_s2": 0.005,
+                "max_acceleration_m_s2": 0.015,
             }
         ],
         output="screen",

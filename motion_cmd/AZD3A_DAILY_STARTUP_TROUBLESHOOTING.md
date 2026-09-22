@@ -104,7 +104,7 @@ motor6_raw_velocity_controller
 ```
 
 Motor 6 uses guarded topic `/motor6_conveyor/commands_rpm`, a +/-50 output-rpm
-ceiling, 2 rpm/s ramp, and 0.5-second watchdog. Positive RPM is the physically
+ceiling, 25 rpm/s ramp, and 0.5-second watchdog. Positive RPM is the physically
 verified forward direction. The GUI accepts belt speed in mm/s and converts it
 to internal rpm. The 30 mm pulley gives approximately 78.54 mm/s at 50 rpm.
 Its first +1 rpm standalone test passed smoothly with no alarm; the expanded

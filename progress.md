@@ -967,6 +967,23 @@ package build.
 Physical validation should begin with short Motor 1 and Motor 4 moves before
 using the expanded travel.
 
+### Updated guarded speed and ramp profiles (2026-09-22)
+
+The operator-requested ramps are now applied consistently in the guards,
+combined launch, GUI motion-details panel, and regression tests:
+
+- Motor 1 remains capped at 15 mm/s over 0.0996..200 mm, with symmetric
+  15 mm/s^2 acceleration/deceleration.
+- Motor 5 is capped at 20 rpm within its runtime-zeroed +/-90 degree range,
+  with symmetric 20 rpm/s acceleration/deceleration.
+- Motor 6 remains capped at 50 output rpm (78.54 mm/s on the verified 30 mm
+  pulley), with a symmetric 25 rpm/s acceleration/deceleration ramp and the
+  0.5-second watchdog.
+
+These are software limits, not a substitute for a staged physical test after
+restart. Begin at small Motor 5 angles and low conveyor belt speed, verify
+feedback and alarm `0x0000`, then increase toward the new ceilings.
+
 ## Motor 6 50 rpm request and Motor 3 reconnection (2026-09-22)
 
 Motor 6's guarded maximum was increased from 5 to 50 gearbox-output rpm, still
