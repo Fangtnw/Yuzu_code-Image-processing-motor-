@@ -2,15 +2,20 @@
 
 The operator panel controls guarded public interfaces for all six machine
 motors across the two AZD3A controllers. It never publishes directly to
-raw ros2_control topics.
+raw ros2_control topics. It shows per-axis ROS feedback freshness and guard
+topic connections; it does not receive EtherCAT state, drive alarms, or an
+independent drive-ready indication.
 
 ## Safety boundary
 
-- The on-screen Motor 2 stop is a commanded, ramped stop. It is not an
-  emergency stop; keep the physical power cutoff accessible.
-- Motor 1 is limited to 0.0996..200 mm above its provisional lower-end zero
-  (half of the 400 mm actuator stroke). Its required velocity is 15 mm/s with
-  a symmetric 15 mm/s^2 software acceleration/deceleration ramp.
+- The on-screen rotary stop sends controlled zero-speed commands to Motors 2
+  and 6. It is not an emergency stop; keep the physical power cutoff
+  accessible.
+- Motor 1's backend range remains 0.0996..200 mm above its provisional
+  lower-end zero (half of the 400 mm actuator stroke). The GUI uses the next
+  encoder-aligned position, 0.1008 mm (displayed as 0.101 mm), as its lower
+  limit and safe-park target. Its required velocity is 15 mm/s with a
+  symmetric 15 mm/s^2 software acceleration/deceleration ramp.
 - Motor 2 is limited to its validated 250 rpm machine requirement.
 - Motors 3 and 4 are limited to 0..15 mm in 0.001 mm increments. Both use the
   required 8 mm/s velocity and symmetric 50 mm/s^2 software ramps. Motor 3 uses
@@ -46,19 +51,37 @@ ros2 launch motor_controller azd3a_motor1_motor2_gui.launch.py
 The filename predates Motor 4 and Motor 6 integration. It is retained for
 compatibility but now starts all six motors.
 
+The machine banner summarizes guard topic connections and fresh axis feedback.
+Each motor panel shows its own feedback state. Motion buttons remain disabled
+until both the guarded backend subscriber and that motor's fresh feedback are
+present. Fresh feedback does not prove the drive is alarm-free or enabled.
+If Motor 2 or Motor 6 feedback becomes stale during rotation, the GUI stops
+refreshing that speed command and sends repeated zero-speed commands. The
+controlled stop buttons remain available while their command backend is
+connected. Linear depth panels include 0..15 mm position bars; Motor 5 includes
+a runtime-zero-relative ±90° bar. The GUI reports command transmission and
+live feedback, but the current ROS status topics do not report target-reached
+or motion-complete events.
 Select **Show motion details** below the motor panels to view each configured
 range, velocity, acceleration, and deceleration. These values are read-only in
-the GUI and mirror the guarded backend settings. A motor's buttons stay
-disabled until its guarded backend subscriber is present.
+the GUI and mirror the guarded backend settings.
 
 Motor 1 entries are in millimetres. The GUI aligns them to the 0.0012 mm
-encoder count before publishing. Motor 2 entries are in rpm; while rotation is
-active, the GUI refreshes the command so the existing 0.5-second watchdog does
+encoder count before publishing and uses 0.1008 mm as the minimum selectable
+position. Motor 2 entries are in rpm; while rotation is active, the GUI
+refreshes the command so the existing 0.5-second watchdog does
 not stop it. Motor 3 and Motor 4 entries are absolute millimetres from their ABZO
-coordinate. Motor 6 entries are belt speed in mm/s; the GUI converts them to
-gearbox-output rpm internally and displays both values in feedback. Closing the GUI publishes repeated Motor 2 and
+coordinate. Motor 6 entries and feedback are belt speed in mm/s; the GUI
+converts commands to gearbox-output rpm internally and keeps rpm out of the
+operator display. The prominent rotary stop sends repeated controlled
+zero-speed commands to Motors 2 and 6. Closing the GUI publishes repeated Motor 2 and
 Motor 6 zero commands; position axes remain holding their last guarded targets
 until the backend shuts down.
+
+Motor 5 zero capture requires fresh feedback and an operator confirmation that
+the mechanism is stationary and at the intended reference pose. Since the
+available interface does not expose an independent drive-stopped signal, the
+operator remains responsible for confirming that condition.
 
 ## Motor 4 troubleshooting record
 
@@ -86,7 +109,7 @@ Full engineering record: `MOTOR4_COMMISSIONING_POSTMORTEM.md`.
 - Motor 6 standalone commissioning passed at +1 output rpm: smooth forward
   motion, watchdog stop, zero final velocity, and no drive alarm.
 - Motor 6 is now software-integrated into the combined GUI with a 50 rpm
-  (78.54 mm/s) guard, 25 rpm/s ramp, live RPM/belt-speed display, and global
+  (78.54 mm/s) guard, 25 rpm/s ramp, live belt-speed display, and global
   rotary stop.
 - The combined Motor 6 GUI path and expanded speed range have passed software
   tests and build/launch loading, but still require staged physical validation.

@@ -18,10 +18,10 @@ MOTOR4_TOPIC = "/motor4_position_controller/commands_mm"
 MOTOR5_TOPIC = "/motor5_position_controller/commands_deg"
 MOTOR5_SET_ZERO_TOPIC = "/motor5_position_controller/set_zero"
 MOTOR6_TOPIC = "/motor6_conveyor/commands_rpm"
-AXIS1_MIN_MM = 0.0996
+AXIS1_MIN_MM = 0.1008
 AXIS1_MAX_MM = 200.0
 AXIS1_INCREMENT_MM = 0.0012
-AXIS1_PARK_MM = 0.0996
+AXIS1_PARK_MM = 0.1008
 AXIS1_VELOCITY_MM_S = 15.0
 AXIS1_ACCELERATION_MM_S2 = 15.0
 AXIS2_GUI_MAX_RPM = 250.0
@@ -51,7 +51,7 @@ def aligned_axis1_position_m(requested_mm: float) -> float:
         raise ValueError("Motor 1 position must be a finite number")
     if not AXIS1_MIN_MM <= requested_mm <= AXIS1_MAX_MM:
         raise ValueError(
-            f"Motor 1 position must be {AXIS1_MIN_MM:.4f}..{AXIS1_MAX_MM:.1f} mm"
+            f"Motor 1 position must be at least {AXIS1_MIN_MM:.3f} mm and no more than {AXIS1_MAX_MM:.1f} mm"
         )
     counts = round(requested_mm / AXIS1_INCREMENT_MM)
     aligned_mm = counts * AXIS1_INCREMENT_MM
@@ -124,56 +124,67 @@ class YuzuOperatorNode(Node):
         self.motor4_position_m = None
         self.motor5_position_rad = None
         self.motor6_velocity_rad_s = None
-        self.feedback_time = None
+        self.feedback_times = {
+            "motor1": None,
+            "motor2": None,
+            "motor3": None,
+            "motor4": None,
+            "motor5": None,
+            "motor6": None,
+        }
+
+    def _mark_feedback(self, motor: str) -> None:
+        self.feedback_times[motor] = self.get_clock().now()
 
     def _joint_state(self, message: JointState) -> None:
         if "motor1_motor2" in message.name:
             index = message.name.index("motor1_motor2")
             if index < len(message.position) and math.isfinite(message.position[index]):
                 self.axis1_position_m = message.position[index]
+                self._mark_feedback("motor1")
             if index < len(message.velocity) and math.isfinite(message.velocity[index]):
                 self.axis2_velocity_rad_s = message.velocity[index]
+                self._mark_feedback("motor2")
         if "axis1_joint" in message.name:
             index = message.name.index("axis1_joint")
             if index < len(message.position) and math.isfinite(message.position[index]):
                 self.axis1_position_m = message.position[index]
+                self._mark_feedback("motor1")
         if "axis2_joint" in message.name:
             index = message.name.index("axis2_joint")
             if index < len(message.velocity) and math.isfinite(message.velocity[index]):
                 self.axis2_velocity_rad_s = message.velocity[index]
+                self._mark_feedback("motor2")
         if "motor4_joint" in message.name:
             index = message.name.index("motor4_joint")
             if index < len(message.position) and math.isfinite(message.position[index]):
                 self.motor4_position_m = message.position[index]
+                self._mark_feedback("motor4")
             if index < len(message.velocity) and math.isfinite(message.velocity[index]):
                 self.motor6_velocity_rad_s = message.velocity[index]
+                self._mark_feedback("motor6")
         if "motor6_joint" in message.name:
             index = message.name.index("motor6_joint")
             if index < len(message.velocity) and math.isfinite(message.velocity[index]):
                 self.motor6_velocity_rad_s = message.velocity[index]
-        self.feedback_time = self.get_clock().now()
+                self._mark_feedback("motor6")
 
     def _dynamic_joint_state(self, message: DynamicJointState) -> None:
-        try:
-            joint_index = message.joint_names.index("motor1_motor2")
-            interfaces = message.interface_values[joint_index]
-            interface_index = interfaces.interface_names.index("motor3_position")
-            position = interfaces.values[interface_index]
-        except (ValueError, IndexError):
-            return
-        if math.isfinite(position):
-            self.motor3_position_m = position
-            self.feedback_time = self.get_clock().now()
-        try:
-            joint_index = message.joint_names.index("motor4_joint")
-            interfaces = message.interface_values[joint_index]
-            interface_index = interfaces.interface_names.index("motor5_position")
-            position = interfaces.values[interface_index]
-        except (ValueError, IndexError):
-            return
-        if math.isfinite(position):
-            self.motor5_position_rad = position
-            self.feedback_time = self.get_clock().now()
+        channels = (
+            ("motor1_motor2", "motor3_position", "motor3_position_m", "motor3"),
+            ("motor4_joint", "motor5_position", "motor5_position_rad", "motor5"),
+        )
+        for joint_name, interface_name, attribute, motor in channels:
+            try:
+                joint_index = message.joint_names.index(joint_name)
+                interfaces = message.interface_values[joint_index]
+                interface_index = interfaces.interface_names.index(interface_name)
+                position = interfaces.values[interface_index]
+            except (ValueError, IndexError):
+                continue
+            if math.isfinite(position):
+                setattr(self, attribute, position)
+                self._mark_feedback(motor)
 
     def publish_axis1(self, position_m: float) -> None:
         message = Float64MultiArray()
@@ -208,11 +219,15 @@ class YuzuOperatorNode(Node):
         message.data = [rpm]
         self.motor6_publisher.publish(message)
 
-    def feedback_is_fresh(self) -> bool:
-        if self.feedback_time is None:
-            return False
-        age = (self.get_clock().now() - self.feedback_time).nanoseconds / 1e9
-        return age <= FEEDBACK_STALE_S
+    def feedback_age(self, motor: str) -> float | None:
+        stamp = self.feedback_times[motor]
+        if stamp is None:
+            return None
+        return (self.get_clock().now() - stamp).nanoseconds / 1e9
+
+    def feedback_is_fresh_for(self, motor: str) -> bool:
+        age = self.feedback_age(motor)
+        return age is not None and age <= FEEDBACK_STALE_S
 
 
 class YuzuOperatorGui:
@@ -226,14 +241,14 @@ class YuzuOperatorGui:
         self.motor5_origin_rad = None
 
         root.title("Yuzu Peeler — Motor Operator")
-        root.geometry("1800x520")
-        root.minsize(1500, 490)
+        root.geometry("1500x900")
+        root.minsize(1050, 760)
         root.protocol("WM_DELETE_WINDOW", self.close)
 
         style = ttk.Style()
         style.configure("Title.TLabel", font=("Sans", 18, "bold"))
         style.configure("Status.TLabel", font=("Sans", 11, "bold"))
-        style.configure("Danger.TButton", font=("Sans", 12, "bold"))
+        style.configure("Banner.TLabel", font=("Sans", 12, "bold"))
 
         outer = ttk.Frame(root, padding=16)
         outer.pack(fill="both", expand=True)
@@ -242,18 +257,49 @@ class YuzuOperatorGui:
         )
         ttk.Label(
             outer,
-            text="Guarded commissioning controls — the physical power cutoff remains the emergency stop.",
-        ).pack(anchor="w", pady=(2, 12))
+            text="SOFTWARE CONTROL ONLY — physical power cutoff is the emergency stop.",
+            style="Banner.TLabel",
+        ).pack(anchor="w", fill="x", pady=(4, 8))
+
+        self.machine_banner = tk.Label(
+            outer,
+            text="BACKEND OFFLINE · waiting for motor feedback",
+            anchor="w",
+            padx=10,
+            pady=8,
+            bg="#5b6470",
+            fg="white",
+            font=("Sans", 12, "bold"),
+        )
+        self.machine_banner.pack(fill="x", pady=(0, 10))
+
+        safety_row = ttk.Frame(outer)
+        safety_row.pack(fill="x", pady=(0, 8))
+        self.connection_text = tk.StringVar(value="No motor backends connected")
+        ttk.Label(safety_row, textvariable=self.connection_text, style="Status.TLabel").pack(side="left")
+        self.rotary_stop_button = tk.Button(
+            safety_row,
+            text="STOP ROTARY MOTORS · CONTROLLED STOP",
+            command=self.stop_rotary_motors,
+            bg="#b42318",
+            fg="white",
+            activebackground="#7a271a",
+            activeforeground="white",
+            font=("Sans", 12, "bold"),
+            padx=12,
+            pady=8,
+            relief="raised",
+        )
+        self.rotary_stop_button.pack(side="right")
 
         panels = ttk.Frame(outer)
         panels.pack(fill="both", expand=True)
-        panels.columnconfigure(0, weight=1)
-        panels.columnconfigure(1, weight=1)
-        panels.columnconfigure(2, weight=1)
-        panels.columnconfigure(3, weight=1)
-        panels.columnconfigure(4, weight=1)
-        panels.columnconfigure(5, weight=1)
+        for column in range(3):
+            panels.columnconfigure(column, weight=1, uniform="motor_panels")
+        panels.rowconfigure(0, weight=1)
+        panels.rowconfigure(1, weight=1)
 
+        self.step_buttons = {motor: [] for motor in range(1, 7)}
         self._build_motor1(panels)
         self._build_motor2(panels)
         self._build_motor3(panels)
@@ -268,30 +314,21 @@ class YuzuOperatorGui:
         self.details_button.pack(anchor="w", pady=(10, 0))
         self.details_frame = self._build_motion_details(outer)
 
-        footer = ttk.Frame(outer)
-        footer.pack(fill="x", pady=(12, 0))
-        self.connection_text = tk.StringVar(value="Waiting for ROS feedback…")
-        ttk.Label(footer, textvariable=self.connection_text, style="Status.TLabel").pack(
-            side="left"
+        self.status_text = tk.StringVar(value="Commands are sent to guarded backends; completion is not reported by this GUI.")
+        self.command_status_label = ttk.Label(
+            outer, textvariable=self.status_text, wraplength=900
         )
-        ttk.Button(
-            footer,
-            text="STOP ROTARY MOTORS",
-            style="Danger.TButton",
-            command=self.stop_rotary_motors,
-        ).pack(side="right")
-
-        self.status_text = tk.StringVar(value="Ready. Start one guarded motor backend.")
-        ttk.Label(outer, textvariable=self.status_text, wraplength=640).pack(
+        self.command_status_label.pack(
             fill="x", pady=(10, 0)
         )
         self.root.after(20, self.tick)
 
     def _build_motor1(self, parent: ttk.Frame) -> None:
         frame = ttk.LabelFrame(parent, text="Motor 1 — Vertical position", padding=12)
-        frame.grid(row=0, column=0, sticky="nsew", padx=(0, 6))
-        ttk.Label(frame, text="Guarded range: 0.0996–200.0000 mm upward").pack(anchor="w")
+        frame.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
+        ttk.Label(frame, text="GUI range: 0.101–200 mm upward").pack(anchor="w")
         ttk.Label(frame, text="Required speed: 15 mm/s").pack(anchor="w")
+        ttk.Label(frame, text="Expanded travel range requires staged validation").pack(anchor="w")
         self.axis1_feedback = tk.StringVar(value="Feedback: —")
         ttk.Label(frame, textvariable=self.axis1_feedback, style="Status.TLabel").pack(
             anchor="w", pady=(10, 12)
@@ -302,22 +339,25 @@ class YuzuOperatorGui:
         self.axis1_entry = ttk.Entry(row, width=12)
         self.axis1_entry.insert(0, "1.9992")
         self.axis1_entry.pack(side="right")
-        ttk.Button(row, text=">", width=3, command=lambda: self.step_axis1(1)).pack(side="right", padx=(2, 0))
-        ttk.Button(row, text="<", width=3, command=lambda: self.step_axis1(-1)).pack(side="right")
+        for label, direction in ((">", 1), ("<", -1)):
+            button = ttk.Button(row, text=label, width=3, command=lambda d=direction: self.step_axis1(d))
+            button.pack(side="right", padx=(2, 0) if direction > 0 else (0, 0))
+            self.step_buttons[1].append(button)
         step_row = ttk.Frame(frame); step_row.pack(fill="x", pady=(4, 0))
         ttk.Label(step_row, text="Step (mm)").pack(side="left")
         self.axis1_step_entry = ttk.Entry(step_row, width=12); self.axis1_step_entry.insert(0, "0.0012"); self.axis1_step_entry.pack(side="right")
         self.axis1_move = ttk.Button(frame, text="Move Motor 1", command=self.move_axis1)
         self.axis1_move.pack(fill="x", pady=(12, 6))
         self.axis1_park = ttk.Button(
-            frame, text="Safe park (0.0996 mm)", command=self.park_axis1
+            frame, text="Safe park (0.101 mm)", command=self.park_axis1
         )
         self.axis1_park.pack(fill="x")
 
     def _build_motor2(self, parent: ttk.Frame) -> None:
         frame = ttk.LabelFrame(parent, text="Motor 2 — Yuzu rotation", padding=12)
-        frame.grid(row=0, column=1, sticky="nsew", padx=(6, 0))
+        frame.grid(row=1, column=0, sticky="nsew", padx=4, pady=4)
         ttk.Label(frame, text="Validated machine range: up to 250 rpm").pack(anchor="w")
+        ttk.Label(frame, text="Combined GUI control physically validated").pack(anchor="w")
         self.axis2_feedback = tk.StringVar(value="Feedback: —")
         ttk.Label(frame, textvariable=self.axis2_feedback, style="Status.TLabel").pack(
             anchor="w", pady=(10, 12)
@@ -343,22 +383,27 @@ class YuzuOperatorGui:
         self.axis2_stop.pack(fill="x")
 
     def _build_motor4(self, parent: ttk.Frame) -> None:
-        frame = ttk.LabelFrame(parent, text="Motor 4 — Peeling depth", padding=12)
-        frame.grid(row=0, column=3, sticky="nsew", padx=(6, 0))
+        frame = ttk.LabelFrame(parent, text="Motor 4 — Peeling depth · slave 1 / Axis 1", padding=12)
+        frame.grid(row=0, column=2, sticky="nsew", padx=4, pady=4)
         ttk.Label(frame, text="Guarded range: 0–15 mm absolute").pack(anchor="w")
         ttk.Label(frame, text="Required speed: 8 mm/s").pack(anchor="w")
+        ttk.Label(frame, text="Combined GUI motion physically validated").pack(anchor="w")
         self.motor4_feedback = tk.StringVar(value="Feedback: —")
         ttk.Label(frame, textvariable=self.motor4_feedback, style="Status.TLabel").pack(
             anchor="w", pady=(10, 12)
         )
+        self.motor4_travel = ttk.Progressbar(frame, maximum=MOTOR4_MAX_MM, mode="determinate")
+        self.motor4_travel.pack(fill="x", pady=(0, 8))
         row = ttk.Frame(frame)
         row.pack(fill="x")
         ttk.Label(row, text="Target (mm)").pack(side="left")
         self.motor4_entry = ttk.Entry(row, width=12)
         self.motor4_entry.insert(0, "0.500")
         self.motor4_entry.pack(side="right")
-        ttk.Button(row, text=">", width=3, command=lambda: self.step_motor4(1)).pack(side="right", padx=(2, 0))
-        ttk.Button(row, text="<", width=3, command=lambda: self.step_motor4(-1)).pack(side="right")
+        for label, direction in ((">", 1), ("<", -1)):
+            button = ttk.Button(row, text=label, width=3, command=lambda d=direction: self.step_motor4(d))
+            button.pack(side="right", padx=(2, 0) if direction > 0 else (0, 0))
+            self.step_buttons[4].append(button)
         step_row = ttk.Frame(frame); step_row.pack(fill="x", pady=(4, 0))
         ttk.Label(step_row, text="Step (mm)").pack(side="left")
         self.motor4_step_entry = ttk.Entry(step_row, width=12); self.motor4_step_entry.insert(0, "0.001"); self.motor4_step_entry.pack(side="right")
@@ -369,9 +414,10 @@ class YuzuOperatorGui:
 
     def _build_motor6(self, parent: ttk.Frame) -> None:
         frame = ttk.LabelFrame(parent, text="Motor 6 — Conveyor", padding=12)
-        frame.grid(row=0, column=5, sticky="nsew", padx=(6, 0))
+        frame.grid(row=1, column=2, sticky="nsew", padx=4, pady=4)
         ttk.Label(frame, text="Guarded belt speed: up to 78.54 mm/s").pack(anchor="w")
         ttk.Label(frame, text="+ direction: verified forward").pack(anchor="w")
+        ttk.Label(frame, text="Combined GUI physical validation required").pack(anchor="w")
         self.motor6_feedback = tk.StringVar(value="Feedback: —")
         ttk.Label(frame, textvariable=self.motor6_feedback, style="Status.TLabel").pack(
             anchor="w", pady=(10, 12)
@@ -402,13 +448,17 @@ class YuzuOperatorGui:
 
     def _build_motor5(self, parent: ttk.Frame) -> None:
         frame = ttk.LabelFrame(parent, text="Motor 5 — Peeler index", padding=12)
-        frame.grid(row=0, column=4, sticky="nsew", padx=(6, 0))
+        frame.grid(row=1, column=1, sticky="nsew", padx=4, pady=4)
         ttk.Label(frame, text="Set zero before commanding ±90°").pack(anchor="w")
         ttk.Label(frame, text="Guarded speed: 20 rpm").pack(anchor="w")
+        ttk.Label(frame, text="Combined 90° validation required").pack(anchor="w")
         self.motor5_feedback = tk.StringVar(value="Feedback: —")
         ttk.Label(frame, textvariable=self.motor5_feedback, style="Status.TLabel").pack(
             anchor="w", pady=(10, 8)
         )
+        ttk.Label(frame, text="−90° from zero     0°     +90° from zero").pack(anchor="w")
+        self.motor5_angle_bar = ttk.Progressbar(frame, maximum=180.0, mode="determinate")
+        self.motor5_angle_bar.pack(fill="x", pady=(0, 8))
         self.motor5_set_zero = ttk.Button(
             frame, text="Set current position as zero", command=self.set_motor5_zero
         )
@@ -419,8 +469,10 @@ class YuzuOperatorGui:
         self.motor5_entry = ttk.Entry(row, width=10)
         self.motor5_entry.insert(0, "90.0")
         self.motor5_entry.pack(side="right")
-        ttk.Button(row, text=">", width=3, command=lambda: self.step_motor5(1)).pack(side="right", padx=(2, 0))
-        ttk.Button(row, text="<", width=3, command=lambda: self.step_motor5(-1)).pack(side="right")
+        for label, direction in ((">", 1), ("<", -1)):
+            button = ttk.Button(row, text=label, width=3, command=lambda d=direction: self.step_motor5(d))
+            button.pack(side="right", padx=(2, 0) if direction > 0 else (0, 0))
+            self.step_buttons[5].append(button)
         step_row = ttk.Frame(frame); step_row.pack(fill="x", pady=(4, 0))
         ttk.Label(step_row, text="Step (deg)").pack(side="left")
         self.motor5_step_entry = ttk.Entry(step_row, width=10); self.motor5_step_entry.insert(0, "1.0"); self.motor5_step_entry.pack(side="right")
@@ -441,22 +493,27 @@ class YuzuOperatorGui:
         self.motor5_home.pack(fill="x")
 
     def _build_motor3(self, parent: ttk.Frame) -> None:
-        frame = ttk.LabelFrame(parent, text="Motor 3 — Peeling depth", padding=12)
-        frame.grid(row=0, column=2, sticky="nsew", padx=(6, 0))
+        frame = ttk.LabelFrame(parent, text="Motor 3 — Peeling depth · slave 0 / Axis 3", padding=12)
+        frame.grid(row=0, column=1, sticky="nsew", padx=4, pady=4)
         ttk.Label(frame, text="Guarded range: 0–15 mm absolute").pack(anchor="w")
         ttk.Label(frame, text="Required speed: 8 mm/s").pack(anchor="w")
+        ttk.Label(frame, text="Combined GUI motion physically validated").pack(anchor="w")
         self.motor3_feedback = tk.StringVar(value="Feedback: —")
         ttk.Label(frame, textvariable=self.motor3_feedback, style="Status.TLabel").pack(
             anchor="w", pady=(10, 12)
         )
+        self.motor3_travel = ttk.Progressbar(frame, maximum=MOTOR3_MAX_MM, mode="determinate")
+        self.motor3_travel.pack(fill="x", pady=(0, 8))
         row = ttk.Frame(frame)
         row.pack(fill="x")
         ttk.Label(row, text="Target (mm)").pack(side="left")
         self.motor3_entry = ttk.Entry(row, width=12)
         self.motor3_entry.insert(0, "0.500")
         self.motor3_entry.pack(side="right")
-        ttk.Button(row, text=">", width=3, command=lambda: self.step_motor3(1)).pack(side="right", padx=(2, 0))
-        ttk.Button(row, text="<", width=3, command=lambda: self.step_motor3(-1)).pack(side="right")
+        for label, direction in ((">", 1), ("<", -1)):
+            button = ttk.Button(row, text=label, width=3, command=lambda d=direction: self.step_motor3(d))
+            button.pack(side="right", padx=(2, 0) if direction > 0 else (0, 0))
+            self.step_buttons[3].append(button)
         step_row = ttk.Frame(frame); step_row.pack(fill="x", pady=(4, 0))
         ttk.Label(step_row, text="Step (mm)").pack(side="left")
         self.motor3_step_entry = ttk.Entry(step_row, width=12); self.motor3_step_entry.insert(0, "0.001"); self.motor3_step_entry.pack(side="right")
@@ -471,7 +528,7 @@ class YuzuOperatorGui:
         rows = (
             (
                 "Motor 1",
-                f"{AXIS1_MIN_MM:.4f}–{AXIS1_MAX_MM:.0f} mm",
+                f"{AXIS1_MIN_MM:.3f}–{AXIS1_MAX_MM:.0f} mm",
                 f"{AXIS1_VELOCITY_MM_S:.0f} mm/s",
                 f"{AXIS1_ACCELERATION_MM_S2:.0f} mm/s²",
                 f"{AXIS1_ACCELERATION_MM_S2:.0f} mm/s²",
@@ -500,7 +557,7 @@ class YuzuOperatorGui:
             (
                 "Motor 6",
                 f"±{MOTOR6_GUI_MAX_MM_S:.2f} mm/s",
-                f"{MOTOR6_GUI_MAX_MM_S:.2f} mm/s max ({MOTOR6_GUI_MAX_RPM:.0f} rpm)",
+                f"{MOTOR6_GUI_MAX_MM_S:.2f} mm/s max",
                 f"{MOTOR6_ACCELERATION_RPM_S * math.pi * MOTOR6_PULLEY_DIAMETER_MM / 60.0:.2f} mm/s²",
                 f"{MOTOR6_ACCELERATION_RPM_S * math.pi * MOTOR6_PULLEY_DIAMETER_MM / 60.0:.2f} mm/s²",
             ),
@@ -533,7 +590,7 @@ class YuzuOperatorGui:
     def toggle_motion_details(self) -> None:
         self.details_visible = not self.details_visible
         if self.details_visible:
-            self.details_frame.pack(fill="x", pady=(6, 0), before=self.details_button.master.winfo_children()[-2])
+            self.details_frame.pack(fill="x", pady=(6, 0), before=self.command_status_label)
             self.details_button.configure(text="Hide motion details ▴")
         else:
             self.details_frame.pack_forget()
@@ -573,7 +630,7 @@ class YuzuOperatorGui:
             messagebox.showerror("Invalid Motor 1 command", str(error))
             return
         self.node.publish_axis1(position_m)
-        self.status_text.set(f"Motor 1 command accepted by GUI: {position_m * 1000:.4f} mm")
+        self.status_text.set(f"Motor 1 command sent: {position_m * 1000:.4f} mm · monitor feedback for completion")
 
     def park_axis1(self) -> None:
         self.axis1_entry.delete(0, tk.END)
@@ -592,7 +649,7 @@ class YuzuOperatorGui:
         self.axis2_command_rpm = rpm * self.axis2_direction.get()
         self.axis2_running = rpm > 0.0
         self.node.publish_axis2(self.axis2_command_rpm)
-        self.status_text.set(f"Motor 2 command active: {self.axis2_command_rpm:.1f} rpm")
+        self.status_text.set(f"Motor 2 speed command sent: {self.axis2_command_rpm:.1f} rpm")
 
     def stop_axis2(self) -> None:
         self.axis2_running = False
@@ -610,7 +667,7 @@ class YuzuOperatorGui:
             messagebox.showerror("Invalid Motor 3 command", str(error))
             return
         self.node.publish_motor3(target_mm)
-        self.status_text.set(f"Motor 3 command accepted by GUI: {target_mm:.3f} mm")
+        self.status_text.set(f"Motor 3 command sent: {target_mm:.3f} mm · monitor feedback for completion")
 
     def home_motor3(self) -> None:
         self.motor3_entry.delete(0, tk.END)
@@ -627,7 +684,7 @@ class YuzuOperatorGui:
             messagebox.showerror("Invalid Motor 4 command", str(error))
             return
         self.node.publish_motor4(target_mm)
-        self.status_text.set(f"Motor 4 command accepted by GUI: {target_mm:.3f} mm")
+        self.status_text.set(f"Motor 4 command sent: {target_mm:.3f} mm · monitor feedback for completion")
 
     def home_motor4(self) -> None:
         self.motor4_entry.delete(0, tk.END)
@@ -641,9 +698,18 @@ class YuzuOperatorGui:
         if self.node.motor5_position_rad is None:
             messagebox.showerror("Motor 5 unavailable", "No valid Motor 5 feedback is available.")
             return
+        if not self.node.feedback_is_fresh_for("motor5"):
+            messagebox.showerror("Motor 5 feedback stale", "Wait for fresh Motor 5 feedback before capturing zero.")
+            return
+        if not messagebox.askyesno(
+            "Confirm Motor 5 stopped",
+            "Confirm the mechanism is stationary and at the intended zero pose. "
+            "The GUI has no independent drive-state or velocity interlock for this action.",
+        ):
+            return
         self.node.set_motor5_zero()
         self.motor5_origin_rad = self.node.motor5_position_rad
-        self.status_text.set("Motor 5 runtime zero captured at the current mechanism pose.")
+        self.status_text.set("Motor 5 zero request sent; verify the displayed relative position before moving.")
 
     def move_motor5(self) -> None:
         if self.node.motor5_publisher.get_subscription_count() == 0:
@@ -661,14 +727,14 @@ class YuzuOperatorGui:
             return
         signed_angle_deg = angle_deg * self.motor5_direction.get()
         self.node.publish_motor5(signed_angle_deg)
-        self.status_text.set(f"Motor 5 command accepted by GUI: {signed_angle_deg:+.1f}°")
+        self.status_text.set(f"Motor 5 command sent: {signed_angle_deg:+.1f}° · monitor feedback for completion")
 
     def home_motor5(self) -> None:
         if self.motor5_origin_rad is None:
             messagebox.showerror("Motor 5 zero required", "Set the current Motor 5 position as zero first.")
             return
         self.node.publish_motor5(0.0)
-        self.status_text.set("Motor 5 return-to-origin requested.")
+        self.status_text.set("Motor 5 return-to-origin command sent; monitor feedback for completion.")
 
     def start_motor6(self) -> None:
         if self.node.motor6_publisher.get_subscription_count() == 0:
@@ -685,10 +751,7 @@ class YuzuOperatorGui:
         belt_speed_mm_s = (
             abs(self.motor6_command_rpm) * math.pi * MOTOR6_PULLEY_DIAMETER_MM / 60.0
         )
-        self.status_text.set(
-            f"Motor 6 conveyor command active: {belt_speed_mm_s:.2f} mm/s "
-            f"({self.motor6_command_rpm:.2f} rpm)"
-        )
+        self.status_text.set(f"Motor 6 conveyor command sent: {belt_speed_mm_s:.2f} mm/s")
 
     def stop_motor6(self) -> None:
         self.motor6_running = False
@@ -708,19 +771,43 @@ class YuzuOperatorGui:
 
     def tick(self) -> None:
         rclpy.spin_once(self.node, timeout_sec=0.0)
-        axis1_ready = self.node.axis1_publisher.get_subscription_count() > 0
-        axis2_ready = self.node.axis2_publisher.get_subscription_count() > 0
-        motor3_ready = self.node.motor3_publisher.get_subscription_count() > 0
-        motor4_ready = self.node.motor4_publisher.get_subscription_count() > 0
-        motor5_ready = (
-            self.node.motor5_publisher.get_subscription_count() > 0
-            and self.node.motor5_zero_publisher.get_subscription_count() > 0
-        )
-        motor6_ready = self.node.motor6_publisher.get_subscription_count() > 0
+        backend = {
+            "motor1": self.node.axis1_publisher.get_subscription_count() > 0,
+            "motor2": self.node.axis2_publisher.get_subscription_count() > 0,
+            "motor3": self.node.motor3_publisher.get_subscription_count() > 0,
+            "motor4": self.node.motor4_publisher.get_subscription_count() > 0,
+            "motor5": self.node.motor5_publisher.get_subscription_count() > 0
+            and self.node.motor5_zero_publisher.get_subscription_count() > 0,
+            "motor6": self.node.motor6_publisher.get_subscription_count() > 0,
+        }
+        fresh = {
+            motor: self.node.feedback_is_fresh_for(motor) for motor in backend
+        }
+        ready = {motor: backend[motor] and fresh[motor] for motor in backend}
+
+        if self.axis2_running and not ready["motor2"]:
+            self.axis2_running = False
+            self.axis2_command_rpm = 0.0
+            for _ in range(5):
+                self.node.publish_axis2(0.0)
+            self.status_text.set("Motor 2 feedback lost; repeated controlled stop commands sent.")
+        if self.motor6_running and not ready["motor6"]:
+            self.motor6_running = False
+            self.motor6_command_rpm = 0.0
+            for _ in range(5):
+                self.node.publish_motor6(0.0)
+            self.status_text.set("Motor 6 feedback lost; repeated controlled stop commands sent.")
+
+        axis1_ready = ready["motor1"]
+        axis2_ready = ready["motor2"]
+        motor3_ready = ready["motor3"]
+        motor4_ready = ready["motor4"]
+        motor5_ready = backend["motor5"] and ready["motor5"]
+        motor6_ready = ready["motor6"]
         self.axis1_move.configure(state="normal" if axis1_ready else "disabled")
         self.axis1_park.configure(state="normal" if axis1_ready else "disabled")
         self.axis2_start.configure(state="normal" if axis2_ready else "disabled")
-        self.axis2_stop.configure(state="normal" if axis2_ready else "disabled")
+        self.axis2_stop.configure(state="normal" if backend["motor2"] else "disabled")
         self.motor3_move.configure(state="normal" if motor3_ready else "disabled")
         self.motor3_home.configure(state="normal" if motor3_ready else "disabled")
         self.motor4_move.configure(state="normal" if motor4_ready else "disabled")
@@ -730,7 +817,13 @@ class YuzuOperatorGui:
         self.motor5_move.configure(state="normal" if motor5_motion_ready else "disabled")
         self.motor5_home.configure(state="normal" if motor5_motion_ready else "disabled")
         self.motor6_start.configure(state="normal" if motor6_ready else "disabled")
-        self.motor6_stop.configure(state="normal" if motor6_ready else "disabled")
+        self.motor6_stop.configure(state="normal" if backend["motor6"] else "disabled")
+        for motor_id in (1, 3, 4):
+            state = "normal" if ready[f"motor{motor_id}"] else "disabled"
+            for button in self.step_buttons[motor_id]:
+                button.configure(state=state)
+        for button in self.step_buttons[5]:
+            button.configure(state="normal" if motor5_motion_ready else "disabled")
 
         if self.axis2_running:
             self.node.publish_axis2(self.axis2_command_rpm)
@@ -738,63 +831,74 @@ class YuzuOperatorGui:
             self.node.publish_motor6(self.motor6_command_rpm)
 
         if self.node.axis1_position_m is None:
-            self.axis1_feedback.set("Feedback: —")
+            self.axis1_feedback.set("Waiting for Motor 1 feedback")
         else:
+            state = "FEEDBACK LIVE" if fresh["motor1"] else "FEEDBACK STALE"
             self.axis1_feedback.set(
-                f"Feedback: {self.node.axis1_position_m * 1000:.4f} mm"
+                f"{state} · Actual: {self.node.axis1_position_m * 1000:.3f} mm"
             )
         if self.node.axis2_velocity_rad_s is None:
-            self.axis2_feedback.set("Feedback: —")
+            self.axis2_feedback.set("Waiting for Motor 2 feedback")
         else:
             rpm = self.node.axis2_velocity_rad_s * 30.0 / math.pi
-            self.axis2_feedback.set(f"Feedback: {rpm:.2f} rpm")
+            state = "FEEDBACK LIVE" if fresh["motor2"] else "FEEDBACK STALE"
+            self.axis2_feedback.set(f"{state} · Actual: {rpm:.2f} rpm")
         if self.node.motor4_position_m is None:
-            self.motor4_feedback.set("Feedback: —")
+            self.motor4_feedback.set("Waiting for Motor 4 feedback")
+            self.motor4_travel.configure(value=0.0)
         else:
+            state = "FEEDBACK LIVE" if fresh["motor4"] else "FEEDBACK STALE"
+            motor4_mm = self.node.motor4_position_m * 1000.0
             self.motor4_feedback.set(
-                f"Feedback: {self.node.motor4_position_m * 1000:.3f} mm"
+                f"{state} · Actual: {motor4_mm:.3f} mm / 15 mm"
             )
+            self.motor4_travel.configure(value=max(0.0, min(MOTOR4_MAX_MM, motor4_mm)))
         if self.node.motor3_position_m is None:
-            self.motor3_feedback.set("Feedback: —")
+            self.motor3_feedback.set("Waiting for Motor 3 feedback")
+            self.motor3_travel.configure(value=0.0)
         else:
+            state = "FEEDBACK LIVE" if fresh["motor3"] else "FEEDBACK STALE"
+            motor3_mm = self.node.motor3_position_m * 1000.0
             self.motor3_feedback.set(
-                f"Feedback: {self.node.motor3_position_m * 1000:.3f} mm"
+                f"{state} · Actual: {motor3_mm:.3f} mm / 15 mm"
             )
+            self.motor3_travel.configure(value=max(0.0, min(MOTOR3_MAX_MM, motor3_mm)))
         if self.node.motor6_velocity_rad_s is None:
-            self.motor6_feedback.set("Feedback: —")
+            self.motor6_feedback.set("Waiting for Motor 6 feedback")
         else:
             rpm = self.node.motor6_velocity_rad_s * 30.0 / math.pi
             belt_speed_mm_s = rpm * math.pi * MOTOR6_PULLEY_DIAMETER_MM / 60.0
-            self.motor6_feedback.set(
-                f"Feedback: {rpm:.2f} rpm ({belt_speed_mm_s:.2f} mm/s)"
-            )
+            state = "FEEDBACK LIVE" if fresh["motor6"] else "FEEDBACK STALE"
+            self.motor6_feedback.set(f"{state} · Actual: {belt_speed_mm_s:.2f} mm/s")
         if self.node.motor5_position_rad is None:
-            self.motor5_feedback.set("Feedback: —")
+            self.motor5_feedback.set("Waiting for Motor 5 feedback")
         elif self.motor5_origin_rad is None:
-            self.motor5_feedback.set("Feedback ready — set runtime zero")
+            state = "FEEDBACK LIVE" if fresh["motor5"] else "FEEDBACK STALE"
+            self.motor5_feedback.set(f"{state} · Set runtime zero after confirming stopped")
+            self.motor5_angle_bar.configure(value=90.0)
         else:
             relative_deg = math.degrees(
                 self.node.motor5_position_rad - self.motor5_origin_rad
             )
-            self.motor5_feedback.set(f"Feedback: {relative_deg:+.3f}°")
+            state = "FEEDBACK LIVE" if fresh["motor5"] else "FEEDBACK STALE"
+            self.motor5_feedback.set(f"{state} · Relative: {relative_deg:+.3f}°")
+            self.motor5_angle_bar.configure(value=max(0.0, min(180.0, relative_deg + 90.0)))
 
-        backends = []
-        if axis1_ready:
-            backends.append("Motor 1")
-        if axis2_ready:
-            backends.append("Motor 2")
-        if motor3_ready:
-            backends.append("Motor 3")
-        if motor4_ready:
-            backends.append("Motor 4")
-        if motor5_ready:
-            backends.append("Motor 5")
-        if motor6_ready:
-            backends.append("Motor 6")
-        freshness = "feedback live" if self.node.feedback_is_fresh() else "feedback stale"
+        fresh_count = sum(ready.values())
+        connected_count = sum(backend.values())
         self.connection_text.set(
-            f"Backend: {', '.join(backends) if backends else 'none'} — {freshness}"
+            f"Guard topic connections: {connected_count}/6 · fresh axis feedback: {fresh_count}/6"
         )
+        if connected_count == 0:
+            banner, color = "BACKEND OFFLINE · motor commands disabled", "#5b6470"
+        elif fresh_count != connected_count:
+            banner, color = "FEEDBACK MISSING OR STALE · check each motor panel", "#b54708"
+        else:
+            banner, color = (
+                "FEEDBACK FRESH · drive readiness and alarms are not reported by this GUI",
+                "#175cd3",
+            )
+        self.machine_banner.configure(text=banner, bg=color)
         self.root.after(100, self.tick)
 
     def close(self) -> None:
