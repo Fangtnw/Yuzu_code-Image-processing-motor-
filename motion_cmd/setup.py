@@ -16,9 +16,9 @@ setup(
     ],
     install_requires=["setuptools"],
     zip_safe=True,
-    maintainer="fang",
-    maintainer_email="todo@example.com",
-    description="ROS2 utilities for one-axis AZD3A-KED EtherCAT bring-up.",
+    maintainer="Yuzu Peeler Team",
+    maintainer_email="fang@users.noreply.github.com",
+    description="Guarded ROS 2 control, EtherCAT mappings, and operator GUI for the six-motor Yuzu peeler.",
     license="MIT",
     entry_points={
         "console_scripts": [

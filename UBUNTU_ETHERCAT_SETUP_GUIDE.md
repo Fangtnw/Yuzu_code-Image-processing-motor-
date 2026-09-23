@@ -98,9 +98,9 @@ AZD3A #2 CN5       -> unused
 
 slave 0 Axis 1 -> Motor 1, AZM46AK / EZSM3LD040AZAK linear slide
 slave 0 Axis 2 -> Motor 2, AZM46AK-FC7.2UA yuzu rotation
-slave 0 Axis 3 -> Motor 3, reconnected; software verification/integration pending
+slave 0 Axis 3 -> Motor 3, combined GUI position control
 slave 1 Axis 1 -> Motor 4, DR28T1A03-AZAKR peeling-depth slide
-slave 1 Axis 2 -> Motor 5, not included in the current combined GUI
+slave 1 Axis 2 -> Motor 5, combined GUI runtime-zeroed peeler index
 slave 1 Axis 3 -> Motor 6, AZM46AK-PS50 / MISUMI SVKA conveyor
 ```
 
@@ -163,6 +163,28 @@ modinfo ec_generic
 
 Kernel updates require rebuilding and reinstalling these modules for the new
 `uname -r`.
+
+### Customer-PC deployment requirement
+
+The IgH modules are kernel-specific. On 2026-09-23, Ubuntu booted kernel
+`6.8.0-138-generic` after the machine previously used `6.8.0-124-generic`;
+the installed `ec_master.ko` existed only for the older kernel, so the master
+failed to load. Rebuild and install the modules against the customer's active
+kernel after every kernel upgrade, then run `depmod -a` and verify with
+`modinfo ec_master`.
+
+Also configure the customer's EtherCAT NIC in `/etc/sysconfig/ethercat` before
+starting the service:
+
+```ini
+MASTER0_DEVICE="<ethercat-NIC-MAC-or-interface>"
+DEVICE_MODULES="generic"
+```
+
+An empty `MASTER0_DEVICE` produces `No network cards for EtherCAT specified`
+and leaves `/dev/EtherCAT0` absent even when both kernel modules are installed.
+The MAC address is preferable to a changing interface name; it must be
+replaced with the customer's actual dedicated EtherCAT port.
 
 ## 6. Secure Boot
 

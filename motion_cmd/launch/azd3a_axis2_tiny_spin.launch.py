@@ -83,7 +83,7 @@ def generate_launch_description() -> LaunchDescription:
             ),
             DeclareLaunchArgument(
                 "max_acceleration_rpm_s",
-                default_value="10.0",
+                default_value="500.0",
                 description="Axis 2 command ramp in rpm/s",
             ),
             DeclareLaunchArgument(

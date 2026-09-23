@@ -25,17 +25,17 @@ rpdo:
 tpdo:
   - index: 0x1a00
     channels:
-      - {index: 0x6041, sub_index: 0, type: uint16}
+      - {index: 0x6041, sub_index: 0, type: uint16, state_interface: motor1_status}
       - {index: 0x6064, sub_index: 0, type: int32, state_interface: position, factor: -0.0000012, offset: 0.0023988}
       - {index: 0x6061, sub_index: 0, type: int8}
   - index: 0x1a11
     channels:
-      - {index: 0x6841, sub_index: 0, type: uint16}
+      - {index: 0x6841, sub_index: 0, type: uint16, state_interface: motor2_status}
       - {index: 0x6864, sub_index: 0, type: int32}
       - {index: 0x686c, sub_index: 0, type: int32, state_interface: velocity, factor: 0.00008726646259971647}
       - {index: 0x6861, sub_index: 0, type: int8}
   - index: 0x1a20
     channels:
-      - {index: 0x7041, sub_index: 0, type: uint16}
+      - {index: 0x7041, sub_index: 0, type: uint16, state_interface: motor3_status}
       - {index: 0x7064, sub_index: 0, type: int32, state_interface: motor3_position, factor: 0.0000001}
       - {index: 0x7061, sub_index: 0, type: int8}

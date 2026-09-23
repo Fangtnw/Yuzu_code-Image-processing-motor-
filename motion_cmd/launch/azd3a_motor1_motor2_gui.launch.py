@@ -80,8 +80,8 @@ def generate_launch_description() -> LaunchDescription:
             executable="azd3a_axis1_command_guard",
             parameters=[{
                 "feedback_joint_name": "motor1_motor2",
-                "min_position_m": 0.0000996,
-                "max_position_m": 0.200,
+                "min_position_m": 0.0,
+                "max_position_m": 0.400,
                 "max_velocity_m_s": 0.015,
                 "max_acceleration_m_s2": 0.015,
             }],
@@ -92,7 +92,7 @@ def generate_launch_description() -> LaunchDescription:
             executable="azd3a_axis2_velocity_guard",
             parameters=[{
                 "max_rpm": 250.0,
-                "max_acceleration_rpm_s": 25.0,
+                "max_acceleration_rpm_s": 500.0,
                 "command_timeout_s": 0.5,
             }],
             output="screen",
@@ -111,8 +111,8 @@ def generate_launch_description() -> LaunchDescription:
             package="motor_controller",
             executable="azd3a_motor6_conveyor_guard",
             parameters=[{
-                "max_rpm": 50.0,
-                "max_acceleration_rpm_s": 25.0,
+                "max_rpm": 60.0,
+                "max_acceleration_rpm_s": 250.0,
                 "command_timeout_s": 0.5,
             }],
             output="screen",

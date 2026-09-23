@@ -17,11 +17,11 @@ HARD_MAX_VELOCITY_M_S = 0.600
 HARD_MAX_ACCELERATION_M_S2 = 0.2
 MIN_TRAVEL_INCREMENT_M = 0.0000012
 
-# Requirement-based assembled-machine defaults. The 200 mm upper bound is half
-# of the 400 mm actuator stroke; launch parameters may change these only within
-# the manufacturer envelope above.
-DEFAULT_MIN_POSITION_M = 0.0000996
-DEFAULT_MAX_POSITION_M = 0.200
+# Requirement-based assembled-machine defaults. The full 400 mm actuator
+# stroke is exposed; launch parameters may narrow this only within the
+# manufacturer envelope above.
+DEFAULT_MIN_POSITION_M = 0.0
+DEFAULT_MAX_POSITION_M = 0.400
 DEFAULT_MAX_VELOCITY_M_S = 0.015
 DEFAULT_MAX_ACCELERATION_M_S2 = 0.015
 UPDATE_RATE_HZ = 200.0

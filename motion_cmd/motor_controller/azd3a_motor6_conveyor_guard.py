@@ -10,7 +10,7 @@ from std_msgs.msg import Float64MultiArray
 PUBLIC_TOPIC = "/motor6_conveyor/commands_rpm"
 RAW_TOPIC = "/motor6_raw_velocity_controller/commands"
 HARD_MAX_RPM = 60.0
-COMMISSIONING_MAX_RPM = 50.0
+COMMISSIONING_MAX_RPM = 60.0
 DEFAULT_ACCELERATION_RPM_S = 25.0
 COMMAND_TIMEOUT_S = 0.5
 UPDATE_PERIOD_S = 0.005
@@ -36,6 +36,8 @@ class Motor6ConveyorGuard(Node):
 
         self.target_rpm = 0.0
         self.output_rpm = 0.0
+        self.acceleration_rpm_s = self.max_acceleration_rpm_s
+        self.deceleration_rpm_s = self.max_acceleration_rpm_s
         self.last_command_time = None
         self.publisher = self.create_publisher(Float64MultiArray, RAW_TOPIC, 10)
         self.create_subscription(Float64MultiArray, PUBLIC_TOPIC, self.on_command, 10)
@@ -47,8 +49,8 @@ class Motor6ConveyorGuard(Node):
         )
 
     def on_command(self, message: Float64MultiArray) -> None:
-        if len(message.data) != 1 or not math.isfinite(message.data[0]):
-            self.get_logger().error("REJECTED Motor 6 command: expected one finite rpm value")
+        if len(message.data) not in (1, 3) or not all(math.isfinite(value) for value in message.data):
+            self.get_logger().error("REJECTED Motor 6 command: expected [rpm] or [rpm, acceleration, deceleration]")
             return
         requested_rpm = float(message.data[0])
         if abs(requested_rpm) > self.max_rpm + 1e-9:
@@ -57,6 +59,17 @@ class Motor6ConveyorGuard(Node):
                 f"+/-{self.max_rpm:.3f} rpm commissioning limit"
             )
             return
+        if len(message.data) == 3:
+            acceleration = float(message.data[1])
+            deceleration = float(message.data[2])
+            if not 0.0 < acceleration <= self.max_acceleration_rpm_s:
+                self.get_logger().error("REJECTED Motor 6 acceleration: exceeds the configured guard limit")
+                return
+            if not 0.0 < deceleration <= self.max_acceleration_rpm_s:
+                self.get_logger().error("REJECTED Motor 6 deceleration: exceeds the configured guard limit")
+                return
+            self.acceleration_rpm_s = acceleration
+            self.deceleration_rpm_s = deceleration
         self.target_rpm = requested_rpm
         self.last_command_time = self.get_clock().now()
 
@@ -67,7 +80,12 @@ class Motor6ConveyorGuard(Node):
             age = (self.get_clock().now() - self.last_command_time).nanoseconds / 1e9
             if age > self.command_timeout_s:
                 self.target_rpm = 0.0
-        max_step = self.max_acceleration_rpm_s * UPDATE_PERIOD_S
+        ramp_rpm_s = (
+            self.acceleration_rpm_s
+            if abs(self.target_rpm) > abs(self.output_rpm)
+            else self.deceleration_rpm_s
+        )
+        max_step = ramp_rpm_s * UPDATE_PERIOD_S
         difference = self.target_rpm - self.output_rpm
         self.output_rpm += max(-max_step, min(max_step, difference))
         message = Float64MultiArray()

@@ -984,6 +984,110 @@ These are software limits, not a substitute for a staged physical test after
 restart. Begin at small Motor 5 angles and low conveyor belt speed, verify
 feedback and alarm `0x0000`, then increase toward the new ceilings.
 
+### Operator GUI defaults and step controls (2026-09-23)
+
+The GUI arrow controls now sit beside each motor's step-size field and publish
+the guarded command immediately. Motor 1 exposes the full 0..400 mm range,
+uses Return to 0 mm, and defaults to a 1 mm step. Motors 3 and 4 default to
+1 mm steps. Motor 5 starts at 0 degrees with a 90-degree step while retaining
+the runtime-zero interlock. Motor 2 defaults to 200 rpm and Motor 6 defaults
+to 50 mm/s.
+
+Motor 6 remains limited to the verified 50 output-rpm backend ceiling
+(78.54 mm/s with the 30 mm pulley). A 100 mm/s GUI ceiling would require about
+63.7 rpm and therefore exceeds the documented 60 rpm drive limit; this must be
+resolved by confirming a higher-rated drive/pulley before raising the guard.
+
+Motor 5's step arrows now provide a separate guarded manual-jog topic before
+zero capture. The operator can jog in 90-degree increments, wait for the
+mechanism to stop, and then capture the current position as zero; typed angle
+and Return-to-origin commands remain unavailable until that zero is captured.
+
+### Hardware step sizes and rotary profiles (2026-09-23)
+
+The GUI now labels hardware-derived step sizes rather than calling them
+generic sensitivity: Motor 1 is 0.0012 mm/count, Motors 3 and 4 are
+0.0001 mm/count, and Motor 5 is 0.0018 degrees/count (200,000 counts/output
+revolution). Motor 2's 250 rpm value is the current project operating limit;
+the AZD3A drive envelope is 416 rpm.
+
+Motor 2 and Motor 6 GUI start commands now include operator-entered
+acceleration and deceleration in rpm/s. Each guard validates these values
+against its configured maximum before applying the ramp, while the watchdog
+and existing speed limits remain active.
+
+### Hardware envelope view and expanded linear limits (2026-09-23)
+
+Motors 3 and 4 are now guarded to 20 mm with 0.0001 mm hardware-count steps;
+the catalog stroke is 30 mm, so the 20 mm value remains a project envelope.
+Motor 6 now uses a round 90 mm/s GUI limit (about 57.3 rpm), below the 60 rpm
+drive maximum and its approximately 94.25 mm/s pulley speed. The GUI's
+scrollable Motion details section now lists these hardware envelopes separately
+from project limits.
+
+Motor 2's 25 rpm/s acceleration/deceleration is a software commissioning cap,
+not a manufacturer limit; 250 rpm/s was previously observed on unloaded test
+hardware but requires load validation. Motor 5's 20 rpm/s profile is likewise a
+software cap; its hardware data specifies 150 rpm output speed but no angular
+travel limit. The GUI now permits +/-180 degrees after runtime zero; confirm
+the mechanical fixture's safe travel before using the expanded range.
+
+### Motor 2 ramp ceiling raised for speed matching (2026-09-23)
+
+The combined GUI launch and standalone Axis 2 commissioning launch now permit
+up to 500 rpm/s acceleration and deceleration for Motor 2, matching the
+250 rpm operating speed more aggressively. The GUI defaults both fields to
+500 rpm/s but still allows lower values. This is a software/commissioning
+ceiling rather than a drive datasheet rating; validate 25, 100, 250, then
+500 rpm/s under the actual Yuzu load and stop if the mechanism vibrates,
+stalls, or alarms.
+
+Motor 6 now has relative conveyor distance-step controls in the GUI. Each
+step uses fresh encoder position feedback, the configured belt speed, and the
+guarded velocity ramp, then requests a controlled stop when the requested
+distance is reached. The existing continuous speed start/stop controls remain
+available.
+
+The default Motor 6 distance step is now 30 mm. A new Operation sequence tab
+maps the peeling workflow into guarded, operator-advanced stages with editable
+Motor 1 approach, Motor 3/4 feed and gripping distances, Motor 2 speed, and
+Motor 6 positioning distance.
+The operation defaults for Motor 1 are now 300 mm approach and 400 mm home;
+the tab keeps every sequence step visible and highlights only the active one.
+The GUI now maps each drive's CiA-402 status word and disables motion controls
+until all six drives are Operation Enabled (`0x0567` pattern), preventing
+commands during startup or after a fault.
+
+The Motor 6 step controller now uses the configured deceleration to begin
+braking at the calculated stopping distance. Its GUI ramp default/combined
+guard ceiling is 250 rpm/s, reducing the braking distance for short 10 mm
+steps compared with the former 25 rpm/s setting. Actual encoder travel is
+shown on a separate line beneath measured belt speed.
+
+### Motor 6 distance-step encoder-scale correction (2026-09-23)
+
+The first combined-GUI distance-step test exposed an encoder scaling error:
+the newly mapped Motor 6 position used `1e-7`, while the drive's verified
+position/velocity scale is `0.000012566370614359173`. The incorrect scale
+under-reported encoder travel by approximately 125.66x, causing a 10 mm step
+to run substantially too far before the stop condition. The combined map now
+uses the verified scale; retest with a short 10 mm step before longer moves.
+
+### EtherCAT deployment recovery after kernel update (2026-09-23)
+
+After an Ubuntu kernel update, the machine booted `6.8.0-138-generic` while
+IgH 1.6.9 modules existed only for `6.8.0-124-generic`. The service therefore
+reported `modprobe: FATAL: Module ec_master not found`. Rebuilding IgH against
+the active kernel and installing `ec_master.ko`/`ec_generic.ko` restored module
+loading. The next restart exposed a separate deployment configuration issue:
+`/etc/sysconfig/ethercat` had no `MASTER0_DEVICE`, so the service reported
+`No network cards for EtherCAT specified` and `/dev/EtherCAT0` was absent.
+
+For customer deployment, install matching modules for the active kernel,
+verify `modinfo ec_master` and `modinfo ec_generic`, configure
+`MASTER0_DEVICE` to the customer's dedicated EtherCAT NIC (MAC or interface),
+set `DEVICE_MODULES="generic"`, then restart and verify `ethercat slaves`.
+
 ## Motor 6 50 rpm request and Motor 3 reconnection (2026-09-22)
 
 Motor 6's guarded maximum was increased from 5 to 50 gearbox-output rpm, still

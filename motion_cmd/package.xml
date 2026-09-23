@@ -3,8 +3,8 @@
 <package format="3">
   <name>motor_controller</name>
   <version>0.1.0</version>
-  <description>ROS2 utilities for one-axis AZD3A-KED EtherCAT bring-up.</description>
-  <maintainer email="todo@example.com">fang</maintainer>
+  <description>Guarded ROS 2 control, EtherCAT mappings, and operator GUI for the six-motor Yuzu peeler.</description>
+  <maintainer email="fang@users.noreply.github.com">Yuzu Peeler Team</maintainer>
   <license>MIT</license>
 
   <depend>rclpy</depend>

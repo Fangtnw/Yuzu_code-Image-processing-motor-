@@ -9,11 +9,12 @@ from std_msgs.msg import Empty, Float64, Float64MultiArray
 
 
 COMMAND_TOPIC = "/motor5_position_controller/commands_deg"
+MANUAL_STEP_TOPIC = "/motor5_position_controller/manual_step_deg"
 SET_ZERO_TOPIC = "/motor5_position_controller/set_zero"
 RAW_TOPIC = "/motor5_raw_position_controller/commands"
 JOINT_NAME = "motor4_joint"
 INTERFACE_NAME = "motor5_position"
-MAX_ANGLE_DEG = 90.0
+MAX_ANGLE_DEG = 180.0
 MAX_VELOCITY_RPM = 20.0
 MAX_ACCELERATION_RPM_S = 20.0
 UPDATE_RATE_HZ = 200.0
@@ -27,15 +28,17 @@ class Motor5PositionGuard(Node):
         self.command_position = None
         self.target_position = None
         self.command_velocity = 0.0
+        self.manual_step_active = False
         self.raw_publisher = self.create_publisher(Float64MultiArray, RAW_TOPIC, 10)
         self.create_subscription(Float64, COMMAND_TOPIC, self.on_command, 10)
+        self.create_subscription(Float64, MANUAL_STEP_TOPIC, self.on_manual_step, 10)
         self.create_subscription(Empty, SET_ZERO_TOPIC, self.on_set_zero, 10)
         self.create_subscription(
             DynamicJointState, "/dynamic_joint_states", self.on_dynamic_state, 10
         )
         self.create_timer(1.0 / UPDATE_RATE_HZ, self.update)
         self.get_logger().info(
-            "Motor 5 guard ready: operator zero required, +/-90 degrees, "
+            "Motor 5 guard ready: operator zero required, +/-180 degrees, "
             "20 rpm, 20 rpm/s"
         )
 
@@ -50,7 +53,7 @@ class Motor5PositionGuard(Node):
         if not math.isfinite(position):
             return
         self.measured_position = position
-        if self.origin is None:
+        if self.origin is None and not self.manual_step_active:
             self.command_position = position
             self.target_position = position
             self.command_velocity = 0.0
@@ -63,6 +66,7 @@ class Motor5PositionGuard(Node):
             self.get_logger().error("REJECTED Motor 5 zero: commanded motion is active")
             return
         self.origin = self.measured_position
+        self.manual_step_active = False
         self.command_position = self.measured_position
         self.target_position = self.measured_position
         self.command_velocity = 0.0
@@ -71,13 +75,26 @@ class Motor5PositionGuard(Node):
     def on_command(self, message: Float64) -> None:
         offset_deg = message.data
         if not math.isfinite(offset_deg) or not -MAX_ANGLE_DEG <= offset_deg <= MAX_ANGLE_DEG:
-            self.get_logger().error("REJECTED Motor 5 angle: permitted range is -90..90 degrees")
+            self.get_logger().error("REJECTED Motor 5 angle: permitted range is -180..180 degrees")
             return
         if self.origin is None or self.command_position is None:
             self.get_logger().error("REJECTED Motor 5 angle: set the runtime zero first")
             return
         self.target_position = self.origin + math.radians(offset_deg)
         self.get_logger().info(f"Accepted Motor 5 signed angle {offset_deg:.3f} deg")
+
+    def on_manual_step(self, message: Float64) -> None:
+        """Jog relative to the current position before the operator defines zero."""
+        step_deg = message.data
+        if not math.isfinite(step_deg) or not -MAX_ANGLE_DEG <= step_deg <= MAX_ANGLE_DEG:
+            self.get_logger().error("REJECTED Motor 5 manual step: permitted range is -180..180 degrees")
+            return
+        if self.command_position is None or self.measured_position is None:
+            self.get_logger().error("REJECTED Motor 5 manual step: no valid feedback yet")
+            return
+        self.target_position = self.command_position + math.radians(step_deg)
+        self.manual_step_active = True
+        self.get_logger().info(f"Accepted Motor 5 manual step {step_deg:+.3f} deg")
 
     def publish(self) -> None:
         message = Float64MultiArray()

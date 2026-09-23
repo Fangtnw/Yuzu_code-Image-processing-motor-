@@ -13,8 +13,8 @@ RAW_TOPIC = "/motor3_raw_position_controller/commands"
 JOINT_NAME = "motor1_motor2"
 INTERFACE_NAME = "motor3_position"
 MIN_POSITION_MM = 0.0
-MAX_POSITION_MM = 15.0
-MIN_INCREMENT_MM = 0.001
+MAX_POSITION_MM = 20.0
+MIN_INCREMENT_MM = 0.0001
 MAX_VELOCITY_M_S = 0.008
 MAX_ACCELERATION_M_S2 = 0.050
 UPDATE_RATE_HZ = 200.0
@@ -35,7 +35,7 @@ class Motor3PositionGuard(Node):
         )
         self.create_timer(1.0 / UPDATE_RATE_HZ, self.update_command)
         self.get_logger().info(
-            "Motor 3 combined guard ready: 0..15 mm, 8 mm/s, 50 mm/s^2"
+            "Motor 3 combined guard ready: 0..20 mm, 8 mm/s, 50 mm/s^2"
         )
 
     def on_dynamic_state(self, message: DynamicJointState) -> None:
@@ -57,11 +57,11 @@ class Motor3PositionGuard(Node):
     def on_command(self, message: Float64) -> None:
         target_mm = message.data
         if not math.isfinite(target_mm) or not MIN_POSITION_MM <= target_mm <= MAX_POSITION_MM:
-            self.get_logger().error("REJECTED Motor 3 target: permitted range is 0..15 mm")
+            self.get_logger().error("REJECTED Motor 3 target: permitted range is 0..20 mm")
             return
         increments = round(target_mm / MIN_INCREMENT_MM)
         if abs(target_mm - increments * MIN_INCREMENT_MM) > 1e-9:
-            self.get_logger().error("REJECTED Motor 3 target: use 0.001 mm increments")
+            self.get_logger().error("REJECTED Motor 3 target: use 0.0001 mm increments")
             return
         if self.command_position is None or self.measured_position is None:
             self.get_logger().error("REJECTED Motor 3 target: no valid feedback yet")

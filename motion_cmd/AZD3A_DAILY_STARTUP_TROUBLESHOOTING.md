@@ -2,11 +2,11 @@
 
 Use this file after reboot and whenever EtherCAT or an AZD3A axis does not
 start normally. Commands assume Ubuntu 22.04, IgH EtherCAT at `/opt/etherlab`,
-NIC `eno2`, and ROS 2 Humble workspace `~/kyutech/azd3a_ws`.
+dedicated EtherCAT NIC, and ROS 2 Humble workspace `~/kyutech/azd3a_ws`.
 
 ## Safety first
 
-- Connect the dedicated Ethernet cable from `eno2` to AZD3A `ECAT IN`.
+- Connect the dedicated Ethernet cable from the configured NIC to AZD3A `ECAT IN`.
 - Turn on the required AZD3A control/main power and confirm grounding.
 - Keep the mechanism clear and the physical power cutoff accessible.
 - Run only one AZD3A ROS launch at a time.
@@ -103,15 +103,15 @@ motor4_raw_position_controller
 motor6_raw_velocity_controller
 ```
 
-Motor 6 uses guarded topic `/motor6_conveyor/commands_rpm`, a +/-50 output-rpm
-ceiling, 25 rpm/s ramp, and 0.5-second watchdog. Positive RPM is the physically
-verified forward direction. The GUI accepts belt speed in mm/s and converts it
-to internal rpm. The 30 mm pulley gives approximately 78.54 mm/s at 50 rpm.
-Its first +1 rpm standalone test passed smoothly with no alarm; the expanded
-range requires staged physical testing beginning at the 10 mm/s GUI default.
+Motor 5 and Motor 6 are included in the combined GUI. Motor 6 uses guarded
+topic `/motor6_conveyor/commands_rpm`, a +/-60 output-rpm ceiling, 250 rpm/s
+ramp, and 0.5-second watchdog. Positive RPM is the physically verified forward
+direction. The GUI accepts belt speed in mm/s and relative distance steps; the
+30 mm pulley gives approximately 78.54 mm/s at 50 rpm. Start distance tests at
+the 30 mm default with a clear conveyor path.
 
 Current linear-motion requirements are Motor 1 at 15 mm/s over the guarded
-0.0996..200 mm range and Motors 3/4 at 8 mm/s over 0..15 mm. Motor 3 uses the
+0..400 mm range and Motors 3/4 at 8 mm/s over 0..20 mm. Motor 3 uses the
 custom `motor3_position` interface and `/dynamic_joint_states` feedback. Use
 the GUI's **Show motion details** control to review range, velocity,
 acceleration, and deceleration before commanding motion.

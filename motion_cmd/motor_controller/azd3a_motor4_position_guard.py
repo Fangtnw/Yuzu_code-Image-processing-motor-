@@ -12,8 +12,8 @@ PUBLIC_TOPIC = "/motor4_position_controller/commands_mm"
 RAW_TOPIC = "/motor4_raw_position_controller/commands"
 JOINT_NAME = "motor4_joint"
 MIN_POSITION_MM = 0.0
-MAX_POSITION_MM = 15.0
-MIN_INCREMENT_MM = 0.001
+MAX_POSITION_MM = 20.0
+MIN_INCREMENT_MM = 0.0001
 HARD_MAX_POSITION_MM = 30.0
 HARD_MAX_VELOCITY_M_S = 0.040
 HARD_MAX_ACCELERATION_M_S2 = 0.2
@@ -38,7 +38,7 @@ class Motor4PositionGuard(Node):
         self.create_subscription(JointState, "/joint_states", self.on_joint_state, 10)
         self.create_timer(1.0 / UPDATE_RATE_HZ, self.update_command)
         self.get_logger().info(
-            "Motor 4 guard ready: absolute 0..15 mm, 0.001 mm increments; "
+            "Motor 4 guard ready: absolute 0..20 mm, 0.0001 mm increments; "
             "8 mm/s velocity, 50 mm/s^2 acceleration/deceleration"
         )
 
@@ -63,11 +63,11 @@ class Motor4PositionGuard(Node):
             self.get_logger().error("REJECTED Motor 4 target: expected a finite value")
             return
         if not MIN_POSITION_MM <= target_mm <= MAX_POSITION_MM:
-            self.get_logger().error("REJECTED Motor 4 target: permitted range is 0..15 mm")
+            self.get_logger().error("REJECTED Motor 4 target: permitted range is 0..20 mm")
             return
         increments = round(target_mm / MIN_INCREMENT_MM)
         if abs(target_mm - increments * MIN_INCREMENT_MM) > 1e-9:
-            self.get_logger().error("REJECTED Motor 4 target: use 0.001 mm increments")
+            self.get_logger().error("REJECTED Motor 4 target: use 0.0001 mm increments")
             return
         if self.command_position is None or self.measured_position is None:
             self.get_logger().error("REJECTED Motor 4 target: no valid feedback yet")
