@@ -66,10 +66,10 @@ Axis 2 guarded RPM control:
 ros2 launch motor_controller azd3a_axis2_tiny_spin.launch.py
 ```
 
-The Motor 2 default ceiling is now the validated 250 rpm machine requirement.
-For maintenance or recommissioning, set a lower ceiling explicitly and validate
-one level at a time. The raw ros2_control boundary and runtime guard are both
-250 rpm.
+The Motor 2 operating ceiling is 332.8 rpm (80% of its 416 rpm output maximum)
+with a 665.6 rpm/s software ramp ceiling. The standalone launch uses the same
+defaults. For maintenance or staged recommissioning, set lower ceilings
+explicitly and increase in measured steps.
 
 ```bash
 # Intermediate validation (recommended before the final range)
@@ -104,14 +104,14 @@ motor6_raw_velocity_controller
 ```
 
 Motor 5 and Motor 6 are included in the combined GUI. Motor 6 uses guarded
-topic `/motor6_conveyor/commands_rpm`, a +/-60 output-rpm ceiling, 250 rpm/s
-ramp, and 0.5-second watchdog. Positive RPM is the physically verified forward
-direction. The GUI accepts belt speed in mm/s and relative distance steps; the
-30 mm pulley gives approximately 78.54 mm/s at 50 rpm. Start distance tests at
-the 30 mm default with a clear conveyor path.
+topic `/motor6_conveyor/commands_rpm`, a +/-48 output-rpm ceiling, 200 rpm/s
+software ramp, and 0.5-second watchdog. Positive RPM is the physically verified
+forward direction. The GUI accepts belt speed in mm/s and relative distance
+steps; 48 rpm gives approximately 75.40 mm/s on the 30 mm pulley.
 
-Current linear-motion settings are Motor 1 at 100 mm/s with a 100 mm/s^2 ramp
-over the guarded 0..400 mm range and Motors 3/4 at 8 mm/s over 0..20 mm. Motor 3 uses the
+Current linear speed caps are Motor 1 at 480 mm/s and Motors 3/4 at 32 mm/s,
+all at 80% of their published maximums. Their GUI ramps are 160 mm/s^2. Motor 1
+is guarded to 0..400 mm and Motors 3/4 to 0..20 mm. Motor 3 uses the
 custom `motor3_position` interface and `/dynamic_joint_states` feedback. Use
 the GUI's **Show motion details** control to review range, velocity,
 acceleration, and deceleration before commanding motion.

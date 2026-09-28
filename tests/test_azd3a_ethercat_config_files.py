@@ -87,15 +87,15 @@ class Azd3aEthercatConfigFileTests(unittest.TestCase):
         self.assertIn("default: 0", slave_text)
         self.assertIn("mode_of_operation\">9", xacro_text)
         self.assertIn("cia402_object_index_offset\">0x0800", xacro_text)
-        self.assertIn("26.179938779914945", xacro_text)
+        self.assertIn("34.85073450382277", xacro_text)
         self.assertIn('DeclareLaunchArgument(\n                "max_rpm"', launch_text)
-        self.assertIn('default_value="250.0"', launch_text)
-        self.assertIn('"max_acceleration_rpm_s",\n                default_value="500.0"', launch_text)
+        self.assertIn('default_value="332.8"', launch_text)
+        self.assertIn('"max_acceleration_rpm_s",\n                default_value="665.6"', launch_text)
         self.assertIn('LaunchConfiguration("max_rpm")', launch_text)
         for expected in (
             "HARD_MAX_RPM = 416.0",
-            "COMMISSIONING_MAX_RPM = 250.0",
-            "DEFAULT_ACCELERATION_RPM_S = 10.0",
+            "COMMISSIONING_MAX_RPM = 332.8",
+            "DEFAULT_ACCELERATION_RPM_S = 665.6",
             "COMMAND_TIMEOUT_S = 0.5",
             'PUBLIC_TOPIC = "/motor2_velocity_controller/commands_rpm"',
             'RAW_TOPIC = "/motor2_raw_velocity_controller/commands"',
@@ -207,17 +207,17 @@ class Azd3aEthercatConfigFileTests(unittest.TestCase):
         self.assertIn("AXIS1_MIN_MM = 0.0", text)
         self.assertIn("AXIS1_MAX_MM = 400.0", text)
         self.assertIn("AXIS1_INCREMENT_MM = 0.0012", text)
-        self.assertIn("AXIS1_VELOCITY_MM_S = 100.0", text)
-        self.assertIn("AXIS1_ACCELERATION_MM_S2 = 100.0", text)
-        self.assertIn("AXIS2_GUI_MAX_RPM = 250.0", text)
-        self.assertIn("AXIS2_ACCELERATION_RPM_S = 500.0", text)
+        self.assertIn("AXIS1_VELOCITY_MM_S = 480.0", text)
+        self.assertIn("AXIS1_ACCELERATION_MM_S2 = 160.0", text)
+        self.assertIn("AXIS2_GUI_MAX_RPM = 332.8", text)
+        self.assertIn("AXIS2_ACCELERATION_RPM_S = 665.6", text)
         self.assertIn("MOTOR4_MIN_MM = 0.0", text)
         self.assertIn("MOTOR4_MAX_MM = 20.0", text)
         self.assertIn("MOTOR3_MAX_MM = 20.0", text)
         self.assertIn("MOTOR4_INCREMENT_MM = 0.0001", text)
-        self.assertIn("MOTOR3_4_VELOCITY_MM_S = 8.0", text)
-        self.assertIn("MOTOR3_ACCELERATION_MM_S2 = 50.0", text)
-        self.assertIn("MOTOR4_ACCELERATION_MM_S2 = 50.0", text)
+        self.assertIn("MOTOR3_4_VELOCITY_MM_S = 32.0", text)
+        self.assertIn("MOTOR3_ACCELERATION_MM_S2 = 160.0", text)
+        self.assertIn("MOTOR4_ACCELERATION_MM_S2 = 160.0", text)
         self.assertIn("MOTOR5_MAX_ANGLE_DEG = 180.0", text)
         self.assertIn("MOTOR5_HARDWARE_STEP_DEG = 0.0018", text)
         self.assertIn("Set current position as zero", text)
@@ -231,7 +231,7 @@ class Azd3aEthercatConfigFileTests(unittest.TestCase):
         self.assertIn("publish_motor5_manual_step", text)
         self.assertIn('text=label', text)
         self.assertIn("if self.motor5_origin_rad is None:", text)
-        self.assertIn("MOTOR6_GUI_MAX_RPM = 60.0", text)
+        self.assertIn("MOTOR6_GUI_MAX_RPM = 48.0", text)
         self.assertIn("MOTOR6_PULLEY_DIAMETER_MM = 30.0", text)
         self.assertIn("checked_motor6_speed_mm_s", text)
         self.assertIn("get_subscription_count()", text)
@@ -282,13 +282,13 @@ class Azd3aEthercatConfigFileTests(unittest.TestCase):
         self.assertIn("motor3_raw_position_controller", controller_text)
         self.assertIn("motor4_raw_position_controller", controller_text)
         self.assertIn("motor6_raw_velocity_controller", controller_text)
-        self.assertIn('"max_rpm": 250.0', launch_text)
-        self.assertIn('"max_acceleration_rpm_s": 500.0', launch_text)
+        self.assertIn('"max_rpm": 332.8', launch_text)
+        self.assertIn('"max_acceleration_rpm_s": 665.6', launch_text)
         self.assertIn('executable="azd3a_motor4_position_guard"', launch_text)
         self.assertIn('executable="azd3a_motor3_position_guard"', launch_text)
         self.assertIn('executable="azd3a_motor6_conveyor_guard"', launch_text)
-        self.assertIn('"max_rpm": 60.0', launch_text)
-        self.assertIn('"max_acceleration_rpm_s": 250.0', launch_text)
+        self.assertIn('"max_rpm": 48.0', launch_text)
+        self.assertIn('"max_acceleration_rpm_s": 200.0', launch_text)
         self.assertIn('executable="yuzu_operator_gui"', launch_text)
 
     def test_motor3_combined_guard_is_absolute_feedback_synchronized_and_bounded(self):
@@ -302,8 +302,8 @@ class Azd3aEthercatConfigFileTests(unittest.TestCase):
             "MIN_POSITION_MM = 0.0",
             "MAX_POSITION_MM = 20.0",
             "MIN_INCREMENT_MM = 0.0001",
-            "MAX_VELOCITY_M_S = 0.008",
-            "MAX_ACCELERATION_M_S2 = 0.050",
+            "MAX_VELOCITY_M_S = 0.032",
+            "MAX_ACCELERATION_M_S2 = 0.160",
             'DynamicJointState, "/dynamic_joint_states"',
             "if not self.operator_command_received:",
         ):
@@ -322,8 +322,8 @@ class Azd3aEthercatConfigFileTests(unittest.TestCase):
             "HARD_MAX_POSITION_MM = 30.0",
             "HARD_MAX_VELOCITY_M_S = 0.040",
             "HARD_MAX_ACCELERATION_M_S2 = 0.2",
-            "REQUIRED_VELOCITY_M_S = 0.008",
-            "DEFAULT_ACCELERATION_M_S2 = 0.050",
+            "REQUIRED_VELOCITY_M_S = 0.032",
+            "DEFAULT_ACCELERATION_M_S2 = 0.160",
             "target_position = target_mm / 1000.0",
         ):
             self.assertIn(expected, guard_text)
@@ -352,8 +352,8 @@ class Azd3aEthercatConfigFileTests(unittest.TestCase):
         self.assertIn("azd3a_slave0_passive_keepalive.yaml", xacro_text)
         for expected in (
             "HARD_MAX_RPM = 60.0",
-            "COMMISSIONING_MAX_RPM = 60.0",
-            "DEFAULT_ACCELERATION_RPM_S = 25.0",
+            "COMMISSIONING_MAX_RPM = 48.0",
+            "DEFAULT_ACCELERATION_RPM_S = 200.0",
             "COMMAND_TIMEOUT_S = 0.5",
             'PUBLIC_TOPIC = "/motor6_conveyor/commands_rpm"',
             'RAW_TOPIC = "/motor6_raw_velocity_controller/commands"',
@@ -388,8 +388,8 @@ class Azd3aEthercatConfigFileTests(unittest.TestCase):
             'MANUAL_STEP_TOPIC = "/motor5_position_controller/manual_step_deg"',
             'INTERFACE_NAME = "motor5_position"',
             "MAX_ANGLE_DEG = 180.0",
-            "MAX_VELOCITY_RPM = 20.0",
-            "MAX_ACCELERATION_RPM_S = 20.0",
+            "MAX_VELOCITY_RPM = 120.0",
+            "MAX_ACCELERATION_RPM_S = 120.0",
             "self.origin = None",
             "self.origin = self.measured_position",
             "def on_manual_step",
@@ -413,7 +413,8 @@ class Azd3aEthercatConfigFileTests(unittest.TestCase):
             "MIN_TRAVEL_INCREMENT_M = 0.0000012",
             "DEFAULT_MIN_POSITION_M = 0.0",
             "DEFAULT_MAX_POSITION_M = 0.400",
-            "DEFAULT_MAX_VELOCITY_M_S = 0.100",
+            "DEFAULT_MAX_VELOCITY_M_S = 0.480",
+            "DEFAULT_MAX_ACCELERATION_M_S2 = 0.160",
             'PUBLIC_TOPIC = "/motor1_position_controller/commands"',
             'RAW_TOPIC = "/motor1_raw_position_controller/commands"',
             'LEGACY_PUBLIC_TOPIC = "/axis1_position_controller/commands"',
@@ -425,8 +426,8 @@ class Azd3aEthercatConfigFileTests(unittest.TestCase):
             self.assertIn(expected, guard_text)
         self.assertIn('"min_position_m": 0.0', launch_text)
         self.assertIn('"max_position_m": 0.400', launch_text)
-        self.assertIn('"max_velocity_m_s": 0.100', launch_text)
-        self.assertIn('"max_acceleration_m_s2": 0.100', launch_text)
+        self.assertIn('"max_velocity_m_s": 0.480', launch_text)
+        self.assertIn('"max_acceleration_m_s2": 0.160', launch_text)
         self.assertIn("position_startup_tolerance\">0.00001", xacro_text)
 
     def test_motor4_commissioning_is_slave1_relative_and_tightly_bounded(self):
@@ -459,7 +460,7 @@ class Azd3aEthercatConfigFileTests(unittest.TestCase):
         self.assertIn('<param name="mode_of_operation">8</param>', xacro_text)
         self.assertIn("MAX_OFFSET_MM = 0.500", guard_text)
         self.assertIn("MIN_INCREMENT_MM = 0.001", guard_text)
-        self.assertIn("MAX_VELOCITY_M_S = 0.002", guard_text)
+        self.assertIn("MAX_VELOCITY_M_S = 0.032", guard_text)
         self.assertIn('PUBLIC_TOPIC = "/motor4_commissioning/offset_mm"', guard_text)
         self.assertIn("-MAX_OFFSET_MM <= offset_mm <= MAX_OFFSET_MM", guard_text)
         self.assertIn("self.origin = position", guard_text)
@@ -488,8 +489,8 @@ class Azd3aEthercatConfigFileTests(unittest.TestCase):
         self.assertIn('<param name="position">0</param>', xacro_text)
         self.assertIn("azd3a_slave1_passive_keepalive.yaml", xacro_text)
         self.assertIn("MAX_OFFSET_MM = 2.000", guard_text)
-        self.assertIn("MAX_VELOCITY_M_S = 0.008", guard_text)
-        self.assertIn("MAX_ACCELERATION_M_S2 = 0.050", guard_text)
+        self.assertIn("MAX_VELOCITY_M_S = 0.032", guard_text)
+        self.assertIn("MAX_ACCELERATION_M_S2 = 0.160", guard_text)
         self.assertIn('PUBLIC_TOPIC = "/motor3_commissioning/offset_mm"', guard_text)
         self.assertIn('executable="azd3a_motor3_commissioning_guard"', launch_text)
 

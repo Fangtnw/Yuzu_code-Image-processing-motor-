@@ -1,4 +1,4 @@
-"""Launch the guarded 50 rpm Motor 6 conveyor test."""
+"""Launch the guarded 48 rpm Motor 6 conveyor test."""
 
 from pathlib import Path
 

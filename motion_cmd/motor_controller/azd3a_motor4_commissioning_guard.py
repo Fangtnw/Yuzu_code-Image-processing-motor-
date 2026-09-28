@@ -13,8 +13,8 @@ RAW_TOPIC = "/motor4_raw_position_controller/commands"
 JOINT_NAME = "motor4_joint"
 MAX_OFFSET_MM = 0.500
 MIN_INCREMENT_MM = 0.001
-MAX_VELOCITY_M_S = 0.002
-MAX_ACCELERATION_M_S2 = 0.005
+MAX_VELOCITY_M_S = 0.032
+MAX_ACCELERATION_M_S2 = 0.160
 UPDATE_RATE_HZ = 200.0
 
 
@@ -33,7 +33,7 @@ class Motor4CommissioningGuard(Node):
         self.create_timer(1.0 / UPDATE_RATE_HZ, self.update_command)
         self.get_logger().info(
             "Motor 4 commissioning guard ready: relative offset -0.500..0.500 mm, "
-            "0.001 mm increments, 2.0 mm/s maximum"
+            "0.001 mm increments, 32.0 mm/s maximum"
         )
 
     def on_joint_state(self, message: JointState) -> None:

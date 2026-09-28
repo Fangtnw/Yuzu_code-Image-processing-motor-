@@ -13,8 +13,8 @@ RAW_TOPIC = "/motor3_raw_position_controller/commands"
 JOINT_NAME = "motor3_joint"
 MAX_OFFSET_MM = 2.000
 MIN_INCREMENT_MM = 0.001
-MAX_VELOCITY_M_S = 0.008
-MAX_ACCELERATION_M_S2 = 0.050
+MAX_VELOCITY_M_S = 0.032
+MAX_ACCELERATION_M_S2 = 0.160
 UPDATE_RATE_HZ = 200.0
 
 
@@ -32,7 +32,7 @@ class Motor3CommissioningGuard(Node):
         self.create_timer(1.0 / UPDATE_RATE_HZ, self.update_command)
         self.get_logger().info(
             "Motor 3 commissioning guard ready: relative -2.000..2.000 mm, "
-            "0.001 mm increments, 8.0 mm/s, 50 mm/s^2 ramp"
+            "0.001 mm increments, 32.0 mm/s, 160 mm/s^2 ramp"
         )
 
     def on_joint_state(self, message: JointState) -> None:

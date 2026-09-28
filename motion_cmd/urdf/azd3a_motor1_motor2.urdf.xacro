@@ -14,7 +14,7 @@
     <parent link="base_link"/>
     <child link="motor1_table"/>
     <axis xyz="0 0 1"/>
-    <limit lower="0.0" upper="0.400" velocity="0.015" effort="43.0"/>
+    <limit lower="0.0" upper="0.400" velocity="0.480" effort="43.0"/>
   </joint>
 
   <joint name="motor4_joint" type="prismatic">
@@ -22,7 +22,7 @@
     <child link="motor4_table"/>
     <axis xyz="1 0 0"/>
     <!-- Tiny negative margin accepts the retained ABZO origin (-0.0034 mm). -->
-    <limit lower="-0.00001" upper="0.030" velocity="0.008" effort="10.0"/>
+    <limit lower="-0.00001" upper="0.030" velocity="0.032" effort="10.0"/>
   </joint>
 
   <ros2_control name="AZD3A_motor1_motor2" type="system">
@@ -39,8 +39,8 @@
         <param name="max">0.400</param>
       </command_interface>
       <command_interface name="velocity">
-        <param name="min">-26.179938779914945</param>
-        <param name="max">26.179938779914945</param>
+        <param name="min">-34.85073450382277</param>
+        <param name="max">34.85073450382277</param>
       </command_interface>
       <command_interface name="motor3_position">
         <param name="min">0.0</param>
@@ -74,9 +74,9 @@
         <param name="max">0.020</param>
       </command_interface>
       <command_interface name="velocity">
-        <!-- Motor 6 conveyor: guarded to +/-50 output rpm. -->
-        <param name="min">-5.235987755982989</param>
-        <param name="max">5.235987755982989</param>
+        <!-- Motor 6 conveyor: 80% of the 60 rpm output maximum. -->
+        <param name="min">-5.026548245743669</param>
+        <param name="max">5.026548245743669</param>
       </command_interface>
       <command_interface name="motor5_position"/>
       <state_interface name="position"/>

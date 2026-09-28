@@ -21,7 +21,7 @@
     <parent link="motor4_base"/>
     <child link="motor4_table"/>
     <axis xyz="1 0 0"/>
-    <limit lower="-0.030" upper="0.030" velocity="0.008" effort="10.0"/>
+    <limit lower="-0.030" upper="0.030" velocity="0.032" effort="10.0"/>
   </joint>
 
   <ros2_control name="AZD3A_motor4_commissioning" type="system">

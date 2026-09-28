@@ -18,8 +18,8 @@ HARD_MAX_POSITION_MM = 30.0
 HARD_MAX_VELOCITY_M_S = 0.040
 HARD_MAX_ACCELERATION_M_S2 = 0.2
 UPDATE_RATE_HZ = 200.0
-REQUIRED_VELOCITY_M_S = 0.008
-DEFAULT_ACCELERATION_M_S2 = 0.050
+REQUIRED_VELOCITY_M_S = 0.032
+DEFAULT_ACCELERATION_M_S2 = 0.160
 
 
 class Motor4PositionGuard(Node):
@@ -39,7 +39,7 @@ class Motor4PositionGuard(Node):
         self.create_timer(1.0 / UPDATE_RATE_HZ, self.update_command)
         self.get_logger().info(
             "Motor 4 guard ready: absolute 0..20 mm, 0.0001 mm increments; "
-            "8 mm/s velocity, 50 mm/s^2 acceleration/deceleration"
+            "32 mm/s velocity, 160 mm/s^2 acceleration/deceleration"
         )
 
     def on_joint_state(self, message: JointState) -> None:

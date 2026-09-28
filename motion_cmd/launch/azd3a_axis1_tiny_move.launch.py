@@ -57,8 +57,8 @@ def generate_launch_description() -> LaunchDescription:
                 # Never command the captured mechanical-end coordinate itself.
                 "min_position_m": 0.0,
                 "max_position_m": 0.400,
-                "max_velocity_m_s": 0.100,
-                "max_acceleration_m_s2": 0.100,
+                "max_velocity_m_s": 0.480,
+                "max_acceleration_m_s2": 0.160,
             }
         ],
         output="screen",

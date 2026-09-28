@@ -128,7 +128,7 @@ setting or a software safety limit.
 | Drive pulley diameter | 30 mm | Official MISUMI SVKA catalog and calculation table |
 | Live electronic gearing | A=1, B=1 | SDO `0x7091:01/02` read from slave 1 Axis 3 |
 | Live software conversion | 500,000 drive counts/output revolution | Verified commissioning configuration; not the catalog's selectable pulse-resolution figure |
-| Current GUI speed cap | 50 output rpm / 78.54 mm/s belt speed | Project software safety limit below the 60 rpm hardware maximum |
+| Current GUI speed cap | 48 output rpm / 75.40 mm/s belt speed | 80% of the 60 rpm permissible hardware maximum |
 
 The conversions used by the Motor 6 ROS configuration are:
 
@@ -147,24 +147,46 @@ The Oriental Motor product page also lists a selectable-resolution example of
 the live 500,000-count/output-revolution ROS conversion without a new drive
 configuration and a measured scaling test.
 
-As of 2026-09-22, Motor 6 is integrated with Motor 4 through one composite
+As of 2026-09-28, Motor 6 is integrated with Motor 4 through one composite
 slave-1 configuration. Local Axis 1 remains Motor 4 CSP position and local
 Axis 3 is Motor 6 CSV velocity; this avoids two ROS hardware instances
-competing for AZD3A #2. The operator guard is now capped at 50 output rpm with
-a 2 rpm/s ramp and 0.5-second watchdog. This corresponds to approximately
-78.54 mm/s belt speed. The standalone +1 rpm physical test is validated; the
-expanded combined-GUI speed range requires staged physical validation.
+competing for AZD3A #2. The operator guard is capped at 48 output rpm with a
+200 rpm/s software ramp and 0.5-second watchdog. This corresponds to
+approximately 75.40 mm/s belt speed. The software ramp is scaled from the
+previous 250 rpm/s profile; the catalog does not state a maximum acceleration.
 
-### Updated linear-axis motion requirements (2026-09-22; Motor 1 speed updates 2026-09-28)
+### 80% hardware speed operating caps (2026-09-28)
 
-- Motor 1 GUI and guard speed is now 100 mm/s with a symmetric 100 mm/s^2 ramp.
-  This remains below the actuator's 600 mm/s catalog maximum and the guard's
-  200 mm/s^2 acceleration ceiling. The operator reports that the assembled
-  mechanism works at 100 mm/s. Its guarded upper position is now
-200 mm, half of the `EZSM3LD040AZAK` 400 mm catalog stroke; the lower bound
-  remains 0.0996 mm above the provisional lower-end zero.
-- Motors 3 and 4 use 8 mm/s motion with symmetric 50 mm/s^2
-  acceleration/deceleration over guarded 0..15 mm ranges. Motor 3 is slave 0
+The supervisor requested operating speed caps at 80% of each installed
+actuator or geared motor's published maximum:
+
+| Motor | Published maximum | 80% operating speed | Acceleration/deceleration setting |
+| --- | ---: | ---: | --- |
+| 1 | 600 mm/s | 480 mm/s | 160 mm/s² (80% of current 200 mm/s² guard ceiling) |
+| 2 | 416 rpm output | 332.8 rpm | 665.6 rpm/s software ramp, scaled from prior 500 rpm/s cap |
+| 3 | 40 mm/s | 32 mm/s | 160 mm/s² (80% of 0.2 m/s² actuator maximum) |
+| 4 | 40 mm/s | 32 mm/s | 160 mm/s² (80% of 0.2 m/s² actuator maximum) |
+| 5 | 150 rpm output | 120 rpm | 120 rpm/s software ramp, scaled from prior 20 rpm/s profile |
+| 6 | 60 rpm output | 48 rpm / 75.40 mm/s belt | 200 rpm/s software ramp, scaled from prior 250 rpm/s profile |
+
+The manufacturer's rotary product data lists permissible speed but no maximum
+acceleration for Motors 2, 5, and 6. Their acceleration/deceleration values
+are software profiles, not hardware ratings; each was scaled in the same ratio
+as its operating speed changed. Motor 1's product page lists maximum speed and
+stroke but no maximum acceleration, so its 160 mm/s² setting is 80% of the
+existing software guard ceiling. These catalog limits do not establish the
+load-dependent safe speed of the assembled peeling mechanism.
+
+### Updated linear-axis motion requirements (2026-09-22; 80% speed caps 2026-09-28)
+
+- Motor 1 GUI and guard speed is 480 mm/s, 80% of the actuator's 600 mm/s
+  catalog maximum, with a 160 mm/s² software ramp. The operator previously
+  reported physical operation at 100 mm/s; 480 mm/s requires staged physical
+  validation. The GUI range is 0..400 mm, while the assembly has a provisional
+  lower-end zero that must be physically confirmed before full-stroke motion.
+- Motors 3 and 4 are set to 32 mm/s and 160 mm/s², each 80% of the DR28's
+  40 mm/s and 0.2 m/s² maximums. Project position guards remain 0..20 mm.
+  Motor 3 is slave 0
   Axis 3 and Motor 4 is slave 1 Axis 1. Motor 3's scaling, direction, alarm-free
   stopping, and 2 mm round trip have been physically commissioned. The plugin
   now supports a tertiary CiA-402 state machine, and Motor 3 is exposed through

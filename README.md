@@ -99,12 +99,16 @@ should use the `motor*` names.
 
 | Motor | Function | GUI command units | Project operating limit |
 |---|---|---|---|
-| 1 | vertical Yuzu placement | mm | 0–400 mm, 100 mm/s (600 mm/s actuator catalog maximum) |
-| 2 | Yuzu rotation | rpm | ±250 rpm, up to 500 rpm/s ramp |
-| 3 | gripping/feed slide | mm | 0–20 mm, 8 mm/s |
-| 4 | peeling-depth slide | mm | 0–20 mm, 8 mm/s |
-| 5 | peeler index | degrees from runtime zero | ±180°, 20 rpm |
-| 6 | conveyor | mm/s and relative distance steps | 0–90 mm/s GUI speed, 30 mm default step |
+| 1 | vertical Yuzu placement | mm | 0–400 mm, 480 mm/s (80% of 600 mm/s actuator maximum) |
+| 2 | Yuzu rotation | rpm | ±332.8 rpm (80% of 416 rpm output maximum) |
+| 3 | gripping/feed slide | mm | 0–20 mm, 32 mm/s (80% of 40 mm/s actuator maximum) |
+| 4 | peeling-depth slide | mm | 0–20 mm, 32 mm/s (80% of 40 mm/s actuator maximum) |
+| 5 | peeler index | degrees from runtime zero | ±180°, 120 rpm (80% of 150 rpm output maximum) |
+| 6 | conveyor | mm/s and relative distance steps | 75.4 mm/s (48 rpm, 80% of 60 rpm maximum), 30 mm default step |
 
-These are project guards, not universal manufacturer limits. Confirm the
-hardware envelope in `motion_cmd/AZD3A_HARDWARE.md` and the GUI details panel.
+The linear acceleration/deceleration ramps use 160 mm/s² (80% of the DR28
+0.2 m/s² maximum acceleration; Motor 1's equivalent is an 80% software guard
+setting). Rotary ramps are software profiles scaled from the previously
+configured values because the rotary motor product specifications do not give
+maximum acceleration ratings. Confirm the hardware envelope in
+`motion_cmd/AZD3A_HARDWARE.md` and the GUI details panel.

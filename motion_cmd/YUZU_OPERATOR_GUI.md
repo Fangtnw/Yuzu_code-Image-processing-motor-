@@ -11,22 +11,25 @@ independent drive-ready indication.
 - The on-screen rotary stop sends controlled zero-speed commands to Motors 2
   and 6. It is not an emergency stop; keep the physical power cutoff
   accessible.
-- Motor 1's backend and GUI range is now 0..400 mm across the full actuator
-  stroke. Return-to-0 commands are allowed; its speed is 100 mm/s with a
-  symmetric 100 mm/s^2 software acceleration/deceleration ramp. The operator
-  reports that the assembled mechanism works at 100 mm/s.
-- Motor 2 is limited to its validated 250 rpm machine requirement.
+- Motor 1's backend and GUI range is 0..400 mm. Its 480 mm/s speed cap is 80%
+  of the actuator's 600 mm/s published maximum; its matching GUI/guard ramp is
+  160 mm/s². The operator has validated 100 mm/s physically, so 480 mm/s needs
+  staged validation.
+- Motor 2 is capped at 332.8 rpm, 80% of its 416 rpm published output maximum.
+  The default acceleration/deceleration is 332.8 rpm/s and the guard cap is
+  665.6 rpm/s; these are software ramps, not manufacturer ratings.
 - Motors 3 and 4 are guarded to 0..20 mm (the DR28 catalog stroke is 30 mm) in
   0.0001 mm hardware-count steps. Both use the
-  required 8 mm/s velocity and symmetric 50 mm/s^2 software ramps. Motor 3 uses
+  32 mm/s velocity and symmetric 160 mm/s^2 ramps, each 80% of the DR28
+  maximums. Motor 3 uses
   the custom `motor3_position` interface on slave 0 Axis 3.
-- Motor 6 is limited to 90 mm/s in the GUI (about 57.3 rpm); the drive maximum
-  is 60 rpm, approximately 94.25 mm/s on the 30 mm pulley. It uses a 250 rpm/s ramp and a 0.5-second
-  watchdog. Positive RPM is the physically verified forward conveyor
-  direction. The GUI accepts the operator command in belt mm/s: 50 rpm on the
-  verified 30 mm pulley equals approximately 78.54 mm/s.
+- Motor 6 is limited to 48 rpm (75.4 mm/s belt speed), 80% of its 60 rpm
+  output maximum. The GUI defaults to that speed and a 200 rpm/s software ramp,
+  scaled from its prior profile; the 0.5-second watchdog remains. Positive RPM
+  is the physically verified forward conveyor direction.
 - Motor 5 uses a project limit of +/-180 degrees from an operator-defined runtime
-  origin at 20 rpm. The encoder/drive has no intrinsic angular travel stop, so
+  origin at 120 rpm, 80% of its 150 rpm output maximum. Its 120 rpm/s ramp is a
+  software profile scaled from the prior setting. The encoder/drive has no intrinsic angular travel stop, so
   the mechanical fixture must define any wider safe range. Before zero capture, the `<`/`>`
   step buttons provide guarded manual jogging; stop the mechanism, then press
   **Set current position as zero** before using typed angle or return commands.
@@ -137,7 +140,7 @@ Full engineering record: `MOTOR4_COMMISSIONING_POSTMORTEM.md`.
 - Repository test result at closeout: 21 tests passed; combined xacro expansion,
   ROS package build, and launch-description loading passed.
 - Motor 3 standalone commissioning passed its 2 mm round trip at 8 mm/s and
-  50 mm/s^2. The driver now has a third CiA-402 state machine, the combined
+  50 mm/s^2 before the supervisor-requested 80% speed update. The driver now has a third CiA-402 state machine, the combined
   backend maps slave 0 Axis 3 through `motor3_position`, and the GUI is unlocked
   behind subscriber/feedback guards. Software validation passed 23 repository
   tests plus 51 driver test results (zero failures). Combined physical testing
