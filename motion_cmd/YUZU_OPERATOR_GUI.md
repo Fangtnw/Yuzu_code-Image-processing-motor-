@@ -12,8 +12,9 @@ independent drive-ready indication.
   and 6. It is not an emergency stop; keep the physical power cutoff
   accessible.
 - Motor 1's backend and GUI range is now 0..400 mm across the full actuator
-  stroke. Return-to-0 commands are allowed; its required velocity is 15 mm/s with a
-  symmetric 15 mm/s^2 software acceleration/deceleration ramp.
+  stroke. Return-to-0 commands are allowed; its speed is 100 mm/s with a
+  symmetric 100 mm/s^2 software acceleration/deceleration ramp. The operator
+  reports that the assembled mechanism works at 100 mm/s.
 - Motor 2 is limited to its validated 250 rpm machine requirement.
 - Motors 3 and 4 are guarded to 0..20 mm (the DR28 catalog stroke is 30 mm) in
   0.0001 mm hardware-count steps. Both use the

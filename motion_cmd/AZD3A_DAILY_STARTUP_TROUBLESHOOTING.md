@@ -96,8 +96,8 @@ Axis 3 on slave 1. The expected active controllers are:
 
 ```text
 joint_state_broadcaster
-axis1_raw_position_controller
-axis2_raw_velocity_controller
+motor1_raw_position_controller
+motor2_raw_velocity_controller
 motor3_raw_position_controller
 motor4_raw_position_controller
 motor6_raw_velocity_controller
@@ -110,8 +110,8 @@ direction. The GUI accepts belt speed in mm/s and relative distance steps; the
 30 mm pulley gives approximately 78.54 mm/s at 50 rpm. Start distance tests at
 the 30 mm default with a clear conveyor path.
 
-Current linear-motion requirements are Motor 1 at 15 mm/s over the guarded
-0..400 mm range and Motors 3/4 at 8 mm/s over 0..20 mm. Motor 3 uses the
+Current linear-motion settings are Motor 1 at 100 mm/s with a 100 mm/s^2 ramp
+over the guarded 0..400 mm range and Motors 3/4 at 8 mm/s over 0..20 mm. Motor 3 uses the
 custom `motor3_position` interface and `/dynamic_joint_states` feedback. Use
 the GUI's **Show motion details** control to review range, velocity,
 acceleration, and deceleration before commanding motion.
@@ -119,14 +119,14 @@ acceleration, and deceleration before commanding motion.
 The current Axis 2 commissioning guard accepts RPM directly on:
 
 ```text
-/axis2_velocity_controller/commands_rpm
+/motor2_velocity_controller/commands_rpm
 ```
 
 Example command, after launching with a matching or higher ceiling:
 
 ```bash
 timeout 16s ros2 topic pub --rate 10 \
-  /axis2_velocity_controller/commands_rpm \
+  /motor2_velocity_controller/commands_rpm \
   std_msgs/msg/Float64MultiArray \
   "{data: [200.0]}"
 ```

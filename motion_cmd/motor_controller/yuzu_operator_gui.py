@@ -11,8 +11,8 @@ from sensor_msgs.msg import JointState
 from std_msgs.msg import Empty, Float64, Float64MultiArray
 
 
-AXIS1_TOPIC = "/axis1_position_controller/commands"
-AXIS2_TOPIC = "/axis2_velocity_controller/commands_rpm"
+MOTOR1_TOPIC = "/motor1_position_controller/commands"
+MOTOR2_TOPIC = "/motor2_velocity_controller/commands_rpm"
 MOTOR3_TOPIC = "/motor3_position_controller/commands_mm"
 MOTOR4_TOPIC = "/motor4_position_controller/commands_mm"
 MOTOR5_TOPIC = "/motor5_position_controller/commands_deg"
@@ -23,8 +23,8 @@ AXIS1_MIN_MM = 0.0
 AXIS1_MAX_MM = 400.0
 AXIS1_INCREMENT_MM = 0.0012
 AXIS1_PARK_MM = 0.0
-AXIS1_VELOCITY_MM_S = 15.0
-AXIS1_ACCELERATION_MM_S2 = 15.0
+AXIS1_VELOCITY_MM_S = 100.0
+AXIS1_ACCELERATION_MM_S2 = 100.0
 AXIS2_GUI_MAX_RPM = 250.0  # project operating limit; drive maximum is 416 rpm
 AXIS2_ACCELERATION_RPM_S = 500.0
 MOTOR4_MIN_MM = 0.0
@@ -126,8 +126,8 @@ def checked_motor6_distance_mm(requested_mm: float) -> float:
 class YuzuOperatorNode(Node):
     def __init__(self) -> None:
         super().__init__("yuzu_operator_gui")
-        self.axis1_publisher = self.create_publisher(Float64MultiArray, AXIS1_TOPIC, 10)
-        self.axis2_publisher = self.create_publisher(Float64MultiArray, AXIS2_TOPIC, 10)
+        self.motor1_publisher = self.create_publisher(Float64MultiArray, MOTOR1_TOPIC, 10)
+        self.motor2_publisher = self.create_publisher(Float64MultiArray, MOTOR2_TOPIC, 10)
         self.motor3_publisher = self.create_publisher(Float64, MOTOR3_TOPIC, 10)
         self.motor4_publisher = self.create_publisher(Float64, MOTOR4_TOPIC, 10)
         self.motor5_publisher = self.create_publisher(Float64, MOTOR5_TOPIC, 10)
@@ -226,17 +226,17 @@ class YuzuOperatorNode(Node):
     def publish_axis1(self, position_m: float) -> None:
         message = Float64MultiArray()
         message.data = [position_m]
-        self.axis1_publisher.publish(message)
+        self.motor1_publisher.publish(message)
 
     def publish_axis2(self, rpm: float) -> None:
         message = Float64MultiArray()
         message.data = [rpm]
-        self.axis2_publisher.publish(message)
+        self.motor2_publisher.publish(message)
 
     def publish_axis2_profile(self, rpm: float, acceleration: float, deceleration: float) -> None:
         message = Float64MultiArray()
         message.data = [rpm, acceleration, deceleration]
-        self.axis2_publisher.publish(message)
+        self.motor2_publisher.publish(message)
 
     def publish_motor3(self, position_mm: float) -> None:
         message = Float64()
@@ -527,7 +527,13 @@ class YuzuOperatorGui:
         frame.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
         ttk.Label(frame, text="Limits: 0–400 mm").pack(anchor="w")
         ttk.Label(frame, text="Step size: 0.0012 mm hardware count · default 1 mm").pack(anchor="w")
-        ttk.Label(frame, text="Speed: 15 mm/s · stage-test the full stroke").pack(anchor="w")
+        ttk.Label(
+            frame,
+            text=(
+                f"Speed: {AXIS1_VELOCITY_MM_S:.0f} mm/s · "
+                f"accel/decel: {AXIS1_ACCELERATION_MM_S2:.0f} mm/s²"
+            ),
+        ).pack(anchor="w")
         self.axis1_feedback = tk.StringVar(value="Feedback: —")
         ttk.Label(frame, textvariable=self.axis1_feedback, style="Status.TLabel").pack(
             anchor="w", pady=(10, 12)
@@ -885,7 +891,7 @@ class YuzuOperatorGui:
         )
 
     def move_axis1(self) -> None:
-        if self.node.axis1_publisher.get_subscription_count() == 0:
+        if self.node.motor1_publisher.get_subscription_count() == 0:
             messagebox.showerror("Motor 1 unavailable", "Axis 1 guarded backend is not running.")
             return
         try:
@@ -903,7 +909,7 @@ class YuzuOperatorGui:
         self.move_axis1()
 
     def start_axis2(self) -> None:
-        if self.node.axis2_publisher.get_subscription_count() == 0:
+        if self.node.motor2_publisher.get_subscription_count() == 0:
             messagebox.showerror("Motor 2 unavailable", "Axis 2 guarded backend is not running.")
             return
         try:
@@ -1099,9 +1105,9 @@ class YuzuOperatorGui:
     def tick(self) -> None:
         rclpy.spin_once(self.node, timeout_sec=0.0)
         backend = {
-            "motor1": self.node.axis1_publisher.get_subscription_count() > 0
+            "motor1": self.node.motor1_publisher.get_subscription_count() > 0
             or self.node.feedback_times["motor1"] is not None,
-            "motor2": self.node.axis2_publisher.get_subscription_count() > 0
+            "motor2": self.node.motor2_publisher.get_subscription_count() > 0
             or self.node.feedback_times["motor2"] is not None,
             "motor3": self.node.motor3_publisher.get_subscription_count() > 0
             or self.node.feedback_times["motor3"] is not None,

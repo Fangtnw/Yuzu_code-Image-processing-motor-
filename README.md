@@ -91,9 +91,15 @@ documented separately; never replace them with offline tests.
 
 ## Current integrated axes
 
+The integrated interface uses one consistent public naming convention:
+`motor1` through `motor6` for topics, controller names, and guard executables.
+The old `axis1`/`axis2` command topics and executable names remain as
+compatibility aliases for existing commissioning scripts; new integrations
+should use the `motor*` names.
+
 | Motor | Function | GUI command units | Project operating limit |
 |---|---|---|---|
-| 1 | vertical Yuzu placement | mm | 0–400 mm, 15 mm/s |
+| 1 | vertical Yuzu placement | mm | 0–400 mm, 100 mm/s (600 mm/s actuator catalog maximum) |
 | 2 | Yuzu rotation | rpm | ±250 rpm, up to 500 rpm/s ramp |
 | 3 | gripping/feed slide | mm | 0–20 mm, 8 mm/s |
 | 4 | peeling-depth slide | mm | 0–20 mm, 8 mm/s |

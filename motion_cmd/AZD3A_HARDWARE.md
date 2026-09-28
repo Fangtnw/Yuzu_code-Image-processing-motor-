@@ -155,13 +155,14 @@ a 2 rpm/s ramp and 0.5-second watchdog. This corresponds to approximately
 78.54 mm/s belt speed. The standalone +1 rpm physical test is validated; the
 expanded combined-GUI speed range requires staged physical validation.
 
-### Updated linear-axis motion requirements (2026-09-22)
+### Updated linear-axis motion requirements (2026-09-22; Motor 1 speed updates 2026-09-28)
 
-- Motor 1 required velocity is 15 mm/s. Its guarded upper position is now
-  200 mm, half of the `EZSM3LD040AZAK` 400 mm catalog stroke; the lower bound
-  remains 0.0996 mm above the provisional lower-end zero. The retained
-acceleration/deceleration ramp is symmetric at 15 mm/s^2 for the 15 mm/s
-operating speed.
+- Motor 1 GUI and guard speed is now 100 mm/s with a symmetric 100 mm/s^2 ramp.
+  This remains below the actuator's 600 mm/s catalog maximum and the guard's
+  200 mm/s^2 acceleration ceiling. The operator reports that the assembled
+  mechanism works at 100 mm/s. Its guarded upper position is now
+200 mm, half of the `EZSM3LD040AZAK` 400 mm catalog stroke; the lower bound
+  remains 0.0996 mm above the provisional lower-end zero.
 - Motors 3 and 4 use 8 mm/s motion with symmetric 50 mm/s^2
   acceleration/deceleration over guarded 0..15 mm ranges. Motor 3 is slave 0
   Axis 3 and Motor 4 is slave 1 Axis 1. Motor 3's scaling, direction, alarm-free
@@ -405,10 +406,13 @@ interface, RxPDO `0x1610`, and TxPDO `0x1A11`. It is feedback-only and must not
 enable Axis 2. Do not reuse the `AZM46AK-FC20DA` 20:1 scaling for Axis 2.
 
 For guarded motion commissioning, operators publish RPM directly to
-`/axis2_velocity_controller/commands_rpm`. The guard checks the active RPM
+`/motor2_velocity_controller/commands_rpm`. The guard checks the active RPM
 boundary, applies an RPM/s acceleration ramp and command watchdog, converts
 RPM to rad/s internally, and alone publishes to the private ros2_control topic
-`/axis2_raw_velocity_controller/commands`.
+`/motor2_raw_velocity_controller/commands`.
+
+The former `/axis2_*` names remain subscribed as compatibility aliases, but
+new applications should use the `motor1` through `motor6` naming convention.
 
 Corrected live commissioning passed at 25, 100, 200, and 250 machine-output
 rpm. The present hardware also passed an experimental 250 output-rpm/s ramp,

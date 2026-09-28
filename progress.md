@@ -1278,3 +1278,14 @@ state reported Motor 3 at `0.0005126 m`, Motor 4 at `0.0005128 m`, and Motor 5
 at `-16.457987 rad` with live velocity feedback `0.0012315 rad/s`. This
 confirms the corrected custom Motor 5 state path is live alongside Motors 1,
 3, 4, and 6. Further GUI polish is intentionally deferred to the next session.
+
+## 2026-09-28 — Motor 1 speed raised to 100 mm/s
+
+The installed `EZSM3LD040AZAK` actuator is documented at 600 mm/s maximum
+speed over a 400 mm stroke. Its Motor 1 guard allows up to 600 mm/s and caps
+acceleration at 200 mm/s². The GUI/guard operating speed and matching ramp were
+first raised from 15 mm/s and 15 mm/s² to 30 mm/s and 30 mm/s², then updated
+to 100 mm/s and 100 mm/s² at the operator's request. The current speed and
+ramp remain below the catalog and guard limits. The operator then reported
+that Motor 1 works at 100 mm/s. The GUI card now displays both speed and
+acceleration/deceleration values directly.

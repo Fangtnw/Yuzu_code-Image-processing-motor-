@@ -5,10 +5,10 @@ controller_manager:
     joint_state_broadcaster:
       type: joint_state_broadcaster/JointStateBroadcaster
 
-    axis1_raw_position_controller:
+    motor1_raw_position_controller:
       type: position_controllers/JointGroupPositionController
 
-    axis2_raw_velocity_controller:
+    motor2_raw_velocity_controller:
       type: velocity_controllers/JointGroupVelocityController
 
     motor4_raw_position_controller:
@@ -23,11 +23,11 @@ controller_manager:
     motor5_raw_position_controller:
       type: forward_command_controller/ForwardCommandController
 
-axis1_raw_position_controller:
+motor1_raw_position_controller:
   ros__parameters:
     joints: [motor1_motor2]
 
-axis2_raw_velocity_controller:
+motor2_raw_velocity_controller:
   ros__parameters:
     joints: [motor1_motor2]
 

@@ -42,13 +42,13 @@ def generate_launch_description() -> LaunchDescription:
     position_controller = Node(
         package="controller_manager",
         executable="spawner",
-        arguments=["axis1_raw_position_controller", "-c", "/controller_manager"],
+            arguments=["motor1_raw_position_controller", "-c", "/controller_manager"],
         output="screen",
     )
 
     command_guard = Node(
         package="motor_controller",
-        executable="azd3a_axis1_command_guard",
+        executable="azd3a_motor1_position_guard",
         parameters=[
             {
                 # Provisional machine coordinates: the captured lower end is
@@ -57,8 +57,8 @@ def generate_launch_description() -> LaunchDescription:
                 # Never command the captured mechanical-end coordinate itself.
                 "min_position_m": 0.0,
                 "max_position_m": 0.400,
-                "max_velocity_m_s": 0.015,
-                "max_acceleration_m_s2": 0.015,
+                "max_velocity_m_s": 0.100,
+                "max_acceleration_m_s2": 0.100,
             }
         ],
         output="screen",

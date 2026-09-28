@@ -20,11 +20,11 @@ MIN_START_POSITION_M = 0.0009
 
 class Axis1VideoDemo(Node):
     def __init__(self) -> None:
-        super().__init__("azd3a_axis1_video_demo")
+        super().__init__("azd3a_motor1_video_demo")
         self.position = None
         self.publisher = self.create_publisher(
             Float64MultiArray,
-            "/axis1_position_controller/commands",
+            "/motor1_position_controller/commands",
             10,
         )
         self.create_subscription(JointState, "/joint_states", self.on_joint_state, 10)

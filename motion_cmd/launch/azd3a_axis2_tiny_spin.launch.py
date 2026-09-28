@@ -43,12 +43,12 @@ def generate_launch_description() -> LaunchDescription:
     velocity_controller = Node(
         package="controller_manager",
         executable="spawner",
-        arguments=["axis2_raw_velocity_controller", "-c", "/controller_manager"],
+        arguments=["motor2_raw_velocity_controller", "-c", "/controller_manager"],
         output="screen",
     )
     command_guard = Node(
         package="motor_controller",
-        executable="azd3a_axis2_velocity_guard",
+        executable="azd3a_motor2_velocity_guard",
         parameters=[
             {
                 "max_rpm": ParameterValue(max_rpm, value_type=float),

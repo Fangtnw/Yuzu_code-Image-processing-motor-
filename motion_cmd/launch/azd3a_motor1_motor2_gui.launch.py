@@ -42,13 +42,13 @@ def generate_launch_description() -> LaunchDescription:
         Node(
             package="controller_manager",
             executable="spawner",
-            arguments=["axis1_raw_position_controller", "-c", "/controller_manager"],
+            arguments=["motor1_raw_position_controller", "-c", "/controller_manager"],
             output="screen",
         ),
         Node(
             package="controller_manager",
             executable="spawner",
-            arguments=["axis2_raw_velocity_controller", "-c", "/controller_manager"],
+            arguments=["motor2_raw_velocity_controller", "-c", "/controller_manager"],
             output="screen",
         ),
         Node(
@@ -77,19 +77,19 @@ def generate_launch_description() -> LaunchDescription:
         ),
         Node(
             package="motor_controller",
-            executable="azd3a_axis1_command_guard",
+            executable="azd3a_motor1_position_guard",
             parameters=[{
                 "feedback_joint_name": "motor1_motor2",
                 "min_position_m": 0.0,
                 "max_position_m": 0.400,
-                "max_velocity_m_s": 0.015,
-                "max_acceleration_m_s2": 0.015,
+                "max_velocity_m_s": 0.100,
+                "max_acceleration_m_s2": 0.100,
             }],
             output="screen",
         ),
         Node(
             package="motor_controller",
-            executable="azd3a_axis2_velocity_guard",
+            executable="azd3a_motor2_velocity_guard",
             parameters=[{
                 "max_rpm": 250.0,
                 "max_acceleration_rpm_s": 500.0,

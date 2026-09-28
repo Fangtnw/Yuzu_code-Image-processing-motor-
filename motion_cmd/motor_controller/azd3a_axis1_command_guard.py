@@ -22,16 +22,18 @@ MIN_TRAVEL_INCREMENT_M = 0.0000012
 # manufacturer envelope above.
 DEFAULT_MIN_POSITION_M = 0.0
 DEFAULT_MAX_POSITION_M = 0.400
-DEFAULT_MAX_VELOCITY_M_S = 0.015
-DEFAULT_MAX_ACCELERATION_M_S2 = 0.015
+DEFAULT_MAX_VELOCITY_M_S = 0.100
+DEFAULT_MAX_ACCELERATION_M_S2 = 0.100
 UPDATE_RATE_HZ = 200.0
-PUBLIC_TOPIC = "/axis1_position_controller/commands"
-RAW_TOPIC = "/axis1_raw_position_controller/commands"
+PUBLIC_TOPIC = "/motor1_position_controller/commands"
+LEGACY_PUBLIC_TOPIC = "/axis1_position_controller/commands"
+RAW_TOPIC = "/motor1_raw_position_controller/commands"
+LEGACY_RAW_TOPIC = "/axis1_raw_position_controller/commands"
 
 
 class Axis1CommandGuard(Node):
     def __init__(self) -> None:
-        super().__init__("azd3a_axis1_command_guard")
+        super().__init__("azd3a_motor1_position_guard")
         self.measured_position = None
         self.command_position = None
         self.target_position = None
@@ -56,7 +58,9 @@ class Axis1CommandGuard(Node):
         self.validate_limits()
 
         self.raw_publisher = self.create_publisher(Float64MultiArray, RAW_TOPIC, 10)
+        self.legacy_raw_publisher = self.create_publisher(Float64MultiArray, LEGACY_RAW_TOPIC, 10)
         self.create_subscription(Float64MultiArray, PUBLIC_TOPIC, self.on_command, 10)
+        self.create_subscription(Float64MultiArray, LEGACY_PUBLIC_TOPIC, self.on_command, 10)
         self.create_subscription(JointState, "/joint_states", self.on_joint_state, 10)
         self.create_timer(1.0 / UPDATE_RATE_HZ, self.update_command)
 
@@ -124,6 +128,7 @@ class Axis1CommandGuard(Node):
         message = Float64MultiArray()
         message.data = [self.command_position]
         self.raw_publisher.publish(message)
+        self.legacy_raw_publisher.publish(message)
 
     def update_command(self) -> None:
         if self.command_position is None or self.target_position is None:
