@@ -10,9 +10,8 @@
 > unchecked items below are retained as the original commissioning record,
 > not as the current work queue.
 
-> **For Ubuntu Codex:** Read this after `progress.md` and
-> `motion_cmd/AZD3A_HARDWARE.md`. The goal is to make Axis 1 repeatable,
-> measured, and safe before adding Axis 2 or Axis 3.
+This archived plan records the original Axis 1 bring-up objectives. It is
+superseded by the current hardware and GUI documentation linked above.
 
 ## Current State
 

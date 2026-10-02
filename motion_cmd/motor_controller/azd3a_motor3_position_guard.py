@@ -16,7 +16,7 @@ MIN_POSITION_MM = 0.0
 MAX_POSITION_MM = 20.0
 MIN_INCREMENT_MM = 0.0001
 MAX_VELOCITY_M_S = 0.032
-MAX_ACCELERATION_M_S2 = 0.160
+MAX_ACCELERATION_M_S2 = 0.064
 UPDATE_RATE_HZ = 200.0
 
 
@@ -35,7 +35,7 @@ class Motor3PositionGuard(Node):
         )
         self.create_timer(1.0 / UPDATE_RATE_HZ, self.update_command)
         self.get_logger().info(
-            "Motor 3 combined guard ready: 0..20 mm, 32 mm/s, 160 mm/s^2"
+            "Motor 3 combined guard ready: 0..20 mm, 32 mm/s, 64 mm/s^2 (0.5 s ramp)"
         )
 
     def on_dynamic_state(self, message: DynamicJointState) -> None:

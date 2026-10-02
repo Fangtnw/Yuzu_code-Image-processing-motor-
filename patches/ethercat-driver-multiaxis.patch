@@ -1,0 +1,440 @@
+diff --git a/ethercat_generic_plugins/ethercat_generic_cia402_drive/include/ethercat_generic_plugins/generic_ec_cia402_drive.hpp b/ethercat_generic_plugins/ethercat_generic_cia402_drive/include/ethercat_generic_plugins/generic_ec_cia402_drive.hpp
+index 3a79c9e..62195b6 100644
+--- a/ethercat_generic_plugins/ethercat_generic_cia402_drive/include/ethercat_generic_plugins/generic_ec_cia402_drive.hpp
++++ b/ethercat_generic_plugins/ethercat_generic_cia402_drive/include/ethercat_generic_plugins/generic_ec_cia402_drive.hpp
+@@ -66,6 +66,34 @@ protected:
+   int fault_reset_command_interface_index_ = -1;
+   bool last_fault_reset_command_ = false;
+   double last_position_ = std::numeric_limits<double>::quiet_NaN();
++  /** Offset applied to standard CiA 402 object indices for multi-axis drives.
++   *  Standard/single-axis drives use 0. AZD3A Axis 2 uses 0x0800 and Axis 3
++   *  uses 0x1000. */
++  uint16_t cia402_object_index_offset_ = 0;
++  /** Optional second CiA 402 axis contained in the same physical slave. */
++  bool secondary_axis_enabled_ = false;
++  uint16_t secondary_cia402_object_index_offset_ = 0;
++  int8_t secondary_mode_of_operation_display_ = 0;
++  int8_t secondary_mode_of_operation_ = -1;
++  uint16_t secondary_last_status_word_ = -1;
++  uint16_t secondary_status_word_ = 0;
++  DeviceState secondary_last_state_ = STATE_START;
++  DeviceState secondary_state_ = STATE_START;
++  /** Optional third CiA 402 axis contained in the same physical slave. */
++  bool tertiary_axis_enabled_ = false;
++  uint16_t tertiary_cia402_object_index_offset_ = 0;
++  int8_t tertiary_mode_of_operation_display_ = 0;
++  int8_t tertiary_mode_of_operation_ = -1;
++  uint16_t tertiary_last_status_word_ = -1;
++  uint16_t tertiary_status_word_ = 0;
++  DeviceState tertiary_last_state_ = STATE_START;
++  DeviceState tertiary_state_ = STATE_START;
++  double tertiary_last_position_ = std::numeric_limits<double>::quiet_NaN();
++  /** Optional CSP startup gate in command-interface units. When finite, the
++   *  drive holds measured position until the controller command agrees with
++   *  feedback within this tolerance. */
++  double position_startup_tolerance_ = std::numeric_limits<double>::infinity();
++  bool position_command_synchronized_ = false;
+ 
+   /** returns device state based upon the status_word */
+   DeviceState deviceState(uint16_t status_word);
+diff --git a/ethercat_generic_plugins/ethercat_generic_cia402_drive/src/generic_ec_cia402_drive.cpp b/ethercat_generic_plugins/ethercat_generic_cia402_drive/src/generic_ec_cia402_drive.cpp
+index 67dd2c1..dc77a1b 100644
+--- a/ethercat_generic_plugins/ethercat_generic_cia402_drive/src/generic_ec_cia402_drive.cpp
++++ b/ethercat_generic_plugins/ethercat_generic_cia402_drive/src/generic_ec_cia402_drive.cpp
+@@ -38,6 +38,24 @@ void EcCiA402Drive::updateState()
+   }
+   last_status_word_ = status_word_;
+   last_state_ = state_;
++  if (secondary_axis_enabled_ && secondary_status_word_ != secondary_last_status_word_) {
++    secondary_state_ = deviceState(secondary_status_word_);
++    if (secondary_state_ != secondary_last_state_) {
++      std::cout << "SECONDARY STATE: " << DEVICE_STATE_STR.at(secondary_state_)
++                << " with status word :" << secondary_status_word_ << std::endl;
++    }
++  }
++  secondary_last_status_word_ = secondary_status_word_;
++  secondary_last_state_ = secondary_state_;
++  if (tertiary_axis_enabled_ && tertiary_status_word_ != tertiary_last_status_word_) {
++    tertiary_state_ = deviceState(tertiary_status_word_);
++    if (tertiary_state_ != tertiary_last_state_) {
++      std::cout << "TERTIARY STATE: " << DEVICE_STATE_STR.at(tertiary_state_)
++                << " with status word :" << tertiary_status_word_ << std::endl;
++    }
++  }
++  tertiary_last_status_word_ = tertiary_status_word_;
++  tertiary_last_state_ = tertiary_state_;
+   counter_++;
+ }
+ 
+@@ -49,8 +67,22 @@ void EcCiA402Drive::processData(size_t entry_idx, uint8_t * domain_address)
+     ethercat_interface::EcPdoSingleInterfaceChannelManager *>(
+     pdo_channels_info_[index]);
+   ethercat_interface::EcPdoSingleInterfaceChannelManager & channel(*channel_ptr);
++  const auto is_cia402_object = [this, &channel](uint16_t standard_index) {
++      return static_cast<uint32_t>(channel.index) ==
++             static_cast<uint32_t>(standard_index) + cia402_object_index_offset_;
++    };
++  const auto is_secondary_cia402_object = [this, &channel](uint16_t standard_index) {
++      return secondary_axis_enabled_ &&
++             static_cast<uint32_t>(channel.index) ==
++             static_cast<uint32_t>(standard_index) + secondary_cia402_object_index_offset_;
++    };
++  const auto is_tertiary_cia402_object = [this, &channel](uint16_t standard_index) {
++      return tertiary_axis_enabled_ &&
++             static_cast<uint32_t>(channel.index) ==
++             static_cast<uint32_t>(standard_index) + tertiary_cia402_object_index_offset_;
++    };
+   // Special case: ControlWord
+-  if (channel.index == CiA402D_RPDO_CONTROLWORD) {
++  if (is_cia402_object(CiA402D_RPDO_CONTROLWORD)) {
+     if (is_operational_) {
+       if (fault_reset_command_interface_index_ >= 0) {
+         if (command_interface_ptr_->at(fault_reset_command_interface_index_) == 0) {
+@@ -72,39 +104,99 @@ void EcCiA402Drive::processData(size_t entry_idx, uint8_t * domain_address)
+       }
+     }
+   }
++  if (is_secondary_cia402_object(CiA402D_RPDO_CONTROLWORD) && is_operational_ &&
++    auto_state_transitions_)
++  {
++    channel.default_value = transition(
++      secondary_state_, channel.ec_read(domain_address));
++  }
++  if (is_tertiary_cia402_object(CiA402D_RPDO_CONTROLWORD) && is_operational_ &&
++    auto_state_transitions_)
++  {
++    channel.default_value = transition(
++      tertiary_state_, channel.ec_read(domain_address));
++  }
+ 
+   // setup current position as default position
+-  if (channel.index == CiA402D_RPDO_POSITION) {
++  if (is_cia402_object(CiA402D_RPDO_POSITION)) {
+     if (mode_of_operation_display_ != ModeOfOperation::MODE_NO_MODE) {
+       channel.default_value =
+         channel.factor * last_position_ + channel.offset;
+     }
++    const bool is_csp =
++      mode_of_operation_display_ == ModeOfOperation::MODE_CYCLIC_SYNC_POSITION;
++    if (is_csp && std::isfinite(position_startup_tolerance_) &&
++      !position_command_synchronized_ && channel.is_command_interface_defined() &&
++      std::isfinite(last_position_))
++    {
++      const double command =
++        command_interface_ptr_->at(channel.command_interface_index(0));
++      if (std::isfinite(command) &&
++        std::abs(command - last_position_) <= position_startup_tolerance_)
++      {
++        position_command_synchronized_ = true;
++      }
++    }
++    channel.override_command = !is_csp ||
++      (std::isfinite(position_startup_tolerance_) && !position_command_synchronized_);
++  }
++  if (is_tertiary_cia402_object(CiA402D_RPDO_POSITION)) {
++    if (tertiary_mode_of_operation_display_ != ModeOfOperation::MODE_NO_MODE &&
++      std::isfinite(tertiary_last_position_))
++    {
++      channel.default_value = channel.factor * tertiary_last_position_ + channel.offset;
++    }
+     channel.override_command =
+-      (mode_of_operation_display_ != ModeOfOperation::MODE_CYCLIC_SYNC_POSITION) ? true : false;
++      tertiary_mode_of_operation_display_ != ModeOfOperation::MODE_CYCLIC_SYNC_POSITION;
+   }
+ 
+   // setup mode of operation
+-  if (channel.index == CiA402D_RPDO_MODE_OF_OPERATION) {
++  if (is_cia402_object(CiA402D_RPDO_MODE_OF_OPERATION)) {
+     if (mode_of_operation_ >= 0 && mode_of_operation_ <= 10) {
+       channel.default_value = mode_of_operation_;
+     }
+   }
++  if (is_secondary_cia402_object(CiA402D_RPDO_MODE_OF_OPERATION)) {
++    if (secondary_mode_of_operation_ >= 0 && secondary_mode_of_operation_ <= 10) {
++      channel.default_value = secondary_mode_of_operation_;
++    }
++  }
++  if (is_tertiary_cia402_object(CiA402D_RPDO_MODE_OF_OPERATION)) {
++    if (tertiary_mode_of_operation_ >= 0 && tertiary_mode_of_operation_ <= 10) {
++      channel.default_value = tertiary_mode_of_operation_;
++    }
++  }
+ 
+   channel.ec_update(domain_address);
+ 
+   // get mode_of_operation_display_
+-  if (channel.index == CiA402D_TPDO_MODE_OF_OPERATION_DISPLAY) {
++  if (is_cia402_object(CiA402D_TPDO_MODE_OF_OPERATION_DISPLAY)) {
+     mode_of_operation_display_ = channel.last_value;
+   }
++  if (is_secondary_cia402_object(CiA402D_TPDO_MODE_OF_OPERATION_DISPLAY)) {
++    secondary_mode_of_operation_display_ = channel.last_value;
++  }
++  if (is_tertiary_cia402_object(CiA402D_TPDO_MODE_OF_OPERATION_DISPLAY)) {
++    tertiary_mode_of_operation_display_ = channel.last_value;
++  }
+ 
+-  if (channel.index == CiA402D_TPDO_POSITION) {
++  if (is_cia402_object(CiA402D_TPDO_POSITION)) {
+     last_position_ = channel.last_value;
+   }
++  if (is_tertiary_cia402_object(CiA402D_TPDO_POSITION)) {
++    tertiary_last_position_ = channel.last_value;
++  }
+ 
+   // Special case: StatusWord
+-  if (channel.index == CiA402D_TPDO_STATUSWORD) {
++  if (is_cia402_object(CiA402D_TPDO_STATUSWORD)) {
+     status_word_ = channel.last_value;
+   }
++  if (is_secondary_cia402_object(CiA402D_TPDO_STATUSWORD)) {
++    secondary_status_word_ = channel.last_value;
++  }
++  if (is_tertiary_cia402_object(CiA402D_TPDO_STATUSWORD)) {
++    tertiary_status_word_ = channel.last_value;
++  }
+ 
+ 
+   // CHECK FOR STATE CHANGE
+@@ -122,6 +214,46 @@ bool EcCiA402Drive::setupSlave(
+   command_interface_ptr_ = command_interface;
+   parameters_ = slave_parameters;
+ 
++  if (parameters_.find("cia402_object_index_offset") != parameters_.end()) {
++    const uint64_t parsed_offset = std::stoull(
++      parameters_["cia402_object_index_offset"], nullptr, 0);
++    if (parsed_offset > std::numeric_limits<uint16_t>::max()) {
++      std::cerr << "EcCiA402Drive: cia402_object_index_offset is out of range." << std::endl;
++      return false;
++    }
++    cia402_object_index_offset_ = static_cast<uint16_t>(parsed_offset);
++  }
++  if (parameters_.find("secondary_cia402_object_index_offset") != parameters_.end()) {
++    const uint64_t parsed_offset = std::stoull(
++      parameters_["secondary_cia402_object_index_offset"], nullptr, 0);
++    if (parsed_offset > std::numeric_limits<uint16_t>::max()) {
++      std::cerr << "EcCiA402Drive: secondary_cia402_object_index_offset is out of range."
++                << std::endl;
++      return false;
++    }
++    secondary_cia402_object_index_offset_ = static_cast<uint16_t>(parsed_offset);
++    secondary_axis_enabled_ = true;
++  }
++  if (parameters_.find("tertiary_cia402_object_index_offset") != parameters_.end()) {
++    const uint64_t parsed_offset = std::stoull(
++      parameters_["tertiary_cia402_object_index_offset"], nullptr, 0);
++    if (parsed_offset > std::numeric_limits<uint16_t>::max()) {
++      std::cerr << "EcCiA402Drive: tertiary_cia402_object_index_offset is out of range."
++                << std::endl;
++      return false;
++    }
++    tertiary_cia402_object_index_offset_ = static_cast<uint16_t>(parsed_offset);
++    tertiary_axis_enabled_ = true;
++  }
++  if (parameters_.find("position_startup_tolerance") != parameters_.end()) {
++    position_startup_tolerance_ = std::stod(parameters_["position_startup_tolerance"]);
++    if (!std::isfinite(position_startup_tolerance_) || position_startup_tolerance_ < 0.0) {
++      std::cerr << "EcCiA402Drive: position_startup_tolerance must be finite and nonnegative."
++                << std::endl;
++      return false;
++    }
++  }
++
+   if (parameters_.find("slave_config") != parameters_.end()) {
+     if (!setup_from_config_file(parameters_["slave_config"])) {
+       return false;
+@@ -137,6 +269,12 @@ bool EcCiA402Drive::setupSlave(
+   if (parameters_.find("mode_of_operation") != parameters_.end()) {
+     mode_of_operation_ = std::stod(parameters_["mode_of_operation"]);
+   }
++  if (parameters_.find("secondary_mode_of_operation") != parameters_.end()) {
++    secondary_mode_of_operation_ = std::stod(parameters_["secondary_mode_of_operation"]);
++  }
++  if (parameters_.find("tertiary_mode_of_operation") != parameters_.end()) {
++    tertiary_mode_of_operation_ = std::stod(parameters_["tertiary_mode_of_operation"]);
++  }
+ 
+   if (parameters_.find("command_interface/reset_fault") != parameters_.end()) {
+     fault_reset_command_interface_index_ = std::stoi(parameters_["command_interface/reset_fault"]);
+diff --git a/ethercat_generic_plugins/ethercat_generic_cia402_drive/test/test_generic_ec_cia402_drive.cpp b/ethercat_generic_plugins/ethercat_generic_cia402_drive/test/test_generic_ec_cia402_drive.cpp
+index ab9990c..f1955f4 100644
+--- a/ethercat_generic_plugins/ethercat_generic_cia402_drive/test/test_generic_ec_cia402_drive.cpp
++++ b/ethercat_generic_plugins/ethercat_generic_cia402_drive/test/test_generic_ec_cia402_drive.cpp
+@@ -14,6 +14,7 @@
+ 
+ #include <map>
+ #include <limits>
++#include <utility>
+ #include <pluginlib/class_loader.hpp>
+ #include "ethercat_interface/ec_slave.hpp"
+ #include "test_generic_ec_cia402_drive.hpp"
+@@ -322,3 +323,154 @@ TEST_F(EcCiA402DriveTest, EcWriteDefaultTargetPosition)
+   plugin_->processData(0, domain_address);
+   ASSERT_EQ(EC_READ_S32(domain_address), 654321);
+ }
++
++TEST_F(EcCiA402DriveTest, ShiftedAxisStatuswordUsesConfiguredOffset)
++{
++  std::string shifted_config(test_drive_config);
++  const std::vector<std::pair<std::string, std::string>> replacements = {
++    {"0x607a", "0x687a"}, {"0x60ff", "0x68ff"},
++    {"0x6071", "0x6871"}, {"0x6072", "0x6872"},
++    {"0x6040", "0x6840"}, {"0x6060", "0x6860"},
++    {"0x6064", "0x6864"}, {"0x606c", "0x686c"},
++    {"0x6077", "0x6877"}, {"0x6041", "0x6841"},
++    {"0x6061", "0x6861"},
++  };
++  for (const auto & replacement : replacements) {
++    size_t position = 0;
++    while ((position = shifted_config.find(replacement.first, position)) != std::string::npos) {
++      shifted_config.replace(position, replacement.first.size(), replacement.second);
++      position += replacement.second.size();
++    }
++  }
++
++  plugin_->cia402_object_index_offset_ = 0x0800;
++  ASSERT_TRUE(plugin_->setup_from_config(YAML::Load(shifted_config)));
++  plugin_->setup_interface_mapping();
++  uint8_t domain_address[2];
++  EC_WRITE_U16(domain_address, 0x0027);  // Operation enabled.
++  plugin_->processData(9, domain_address);  // Shifted statusword 0x6841.
++  plugin_->processData(12, domain_address);  // Final PDO entry updates state.
++  ASSERT_EQ(plugin_->status_word_, 0x0027);
++  ASSERT_EQ(plugin_->state_, STATE_OPERATION_ENABLED);
++}
++
++TEST_F(EcCiA402DriveTest, CspStartupGateHoldsFeedbackUntilCommandMatches)
++{
++  std::vector<double> command_interface = {0.0};
++  plugin_->command_interface_ptr_ = &command_interface;
++  plugin_->parameters_["command_interface/position"] = "0";
++  ASSERT_TRUE(plugin_->setup_from_config(YAML::Load(test_drive_config)));
++  plugin_->setup_interface_mapping();
++  plugin_->mode_of_operation_display_ = 8;
++  plugin_->last_position_ = 15.0;
++  plugin_->position_startup_tolerance_ = 0.1;
++
++  uint8_t domain_address[4];
++  EC_WRITE_S32(domain_address, 0);
++  plugin_->processData(0, domain_address);
++  ASSERT_FALSE(plugin_->position_command_synchronized_);
++  ASSERT_EQ(EC_READ_S32(domain_address), 15);
++
++  command_interface[0] = 15.0;
++  plugin_->processData(0, domain_address);
++  ASSERT_TRUE(plugin_->position_command_synchronized_);
++  ASSERT_EQ(EC_READ_S32(domain_address), 15);
++}
++
++TEST_F(EcCiA402DriveTest, SecondaryAxisTransitionsAndSetsMode)
++{
++  const char secondary_config[] =
++    R"(
++vendor_id: 0x000002BE
++product_id: 0x000013AF
++auto_fault_reset: false
++rpdo:
++  - index: 0x1612
++    channels:
++      - {index: 0x6840, sub_index: 0, type: uint16, default: 0}
++      - {index: 0x6860, sub_index: 0, type: int8, default: 9}
++tpdo:
++  - index: 0x1a11
++    channels:
++      - {index: 0x6841, sub_index: 0, type: uint16}
++      - {index: 0x6861, sub_index: 0, type: int8}
++)";
++  plugin_->secondary_axis_enabled_ = true;
++  plugin_->secondary_cia402_object_index_offset_ = 0x0800;
++  plugin_->secondary_mode_of_operation_ = 9;
++  plugin_->is_operational_ = true;
++  ASSERT_TRUE(plugin_->setup_from_config(YAML::Load(secondary_config)));
++  plugin_->setup_interface_mapping();
++
++  uint8_t status_address[2];
++  EC_WRITE_U16(status_address, 0x0040);  // Switch on disabled.
++  plugin_->processData(2, status_address);
++  uint8_t mode_display_address[1];
++  EC_WRITE_S8(mode_display_address, 9);
++  plugin_->processData(3, mode_display_address);
++  ASSERT_EQ(plugin_->secondary_state_, STATE_SWITCH_ON_DISABLED);
++  ASSERT_EQ(plugin_->secondary_mode_of_operation_display_, 9);
++
++  uint8_t control_address[2];
++  EC_WRITE_U16(control_address, 0);
++  plugin_->processData(0, control_address);
++  ASSERT_EQ(EC_READ_U16(control_address), 0x0006);
++  uint8_t mode_address[1];
++  EC_WRITE_S8(mode_address, 0);
++  plugin_->processData(1, mode_address);
++  ASSERT_EQ(EC_READ_S8(mode_address), 9);
++}
++
++TEST_F(EcCiA402DriveTest, TertiaryAxisTransitionsSetsModeAndHoldsPosition)
++{
++  const char tertiary_config[] =
++    R"(
++vendor_id: 0x000002BE
++product_id: 0x000013AF
++auto_fault_reset: false
++rpdo:
++  - index: 0x1620
++    channels:
++      - {index: 0x7040, sub_index: 0, type: uint16, default: 0}
++      - {index: 0x707a, sub_index: 0, type: int32, default: .nan}
++      - {index: 0x7060, sub_index: 0, type: int8, default: 8}
++tpdo:
++  - index: 0x1a20
++    channels:
++      - {index: 0x7041, sub_index: 0, type: uint16}
++      - {index: 0x7064, sub_index: 0, type: int32}
++      - {index: 0x7061, sub_index: 0, type: int8}
++)";
++  plugin_->tertiary_axis_enabled_ = true;
++  plugin_->tertiary_cia402_object_index_offset_ = 0x1000;
++  plugin_->tertiary_mode_of_operation_ = 8;
++  plugin_->is_operational_ = true;
++  ASSERT_TRUE(plugin_->setup_from_config(YAML::Load(tertiary_config)));
++  plugin_->setup_interface_mapping();
++
++  uint8_t status_address[2];
++  EC_WRITE_U16(status_address, 0x0040);  // Switch on disabled.
++  plugin_->processData(3, status_address);
++  uint8_t position_address[4];
++  EC_WRITE_S32(position_address, 2732);
++  plugin_->processData(4, position_address);
++  uint8_t mode_display_address[1];
++  EC_WRITE_S8(mode_display_address, 8);
++  plugin_->processData(5, mode_display_address);
++  ASSERT_EQ(plugin_->tertiary_state_, STATE_SWITCH_ON_DISABLED);
++  ASSERT_EQ(plugin_->tertiary_mode_of_operation_display_, 8);
++  ASSERT_EQ(plugin_->tertiary_last_position_, 2732);
++
++  uint8_t control_address[2];
++  EC_WRITE_U16(control_address, 0);
++  plugin_->processData(0, control_address);
++  ASSERT_EQ(EC_READ_U16(control_address), 0x0006);
++  uint8_t target_address[4];
++  EC_WRITE_S32(target_address, 0);
++  plugin_->processData(1, target_address);
++  ASSERT_EQ(EC_READ_S32(target_address), 2732);
++  uint8_t mode_address[1];
++  EC_WRITE_S8(mode_address, 0);
++  plugin_->processData(2, mode_address);
++  ASSERT_EQ(EC_READ_S8(mode_address), 8);
++}
+diff --git a/ethercat_generic_plugins/ethercat_generic_cia402_drive/test/test_generic_ec_cia402_drive.hpp b/ethercat_generic_plugins/ethercat_generic_cia402_drive/test/test_generic_ec_cia402_drive.hpp
+index ad123ff..97e81d6 100644
+--- a/ethercat_generic_plugins/ethercat_generic_cia402_drive/test/test_generic_ec_cia402_drive.hpp
++++ b/ethercat_generic_plugins/ethercat_generic_cia402_drive/test/test_generic_ec_cia402_drive.hpp
+@@ -37,6 +37,10 @@ class FriendEcCiA402Drive : public ethercat_generic_plugins::EcCiA402Drive
+   // FRIEND_TEST(EcCiA402DriveTest, FaultReset);
+   FRIEND_TEST(EcCiA402DriveTest, SwitchModeOfOperation);
+   FRIEND_TEST(EcCiA402DriveTest, EcWriteDefaultTargetPosition);
++  FRIEND_TEST(EcCiA402DriveTest, ShiftedAxisStatuswordUsesConfiguredOffset);
++  FRIEND_TEST(EcCiA402DriveTest, CspStartupGateHoldsFeedbackUntilCommandMatches);
++  FRIEND_TEST(EcCiA402DriveTest, SecondaryAxisTransitionsAndSetsMode);
++  FRIEND_TEST(EcCiA402DriveTest, TertiaryAxisTransitionsSetsModeAndHoldsPosition);
+ };
+ 
+ class EcCiA402DriveTest : public ::testing::Test

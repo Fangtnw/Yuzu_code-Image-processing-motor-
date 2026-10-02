@@ -187,11 +187,11 @@ class Azd3aEthercatConfigFileTests(unittest.TestCase):
         text = setup_py.read_text(encoding="utf-8")
 
         self.assertIn("azd3a_ethercat_check", text)
-        self.assertIn("yuzu_operator_gui", text)
+        self.assertIn("yuzu_peeler_gui", text)
         self.assertNotIn("scripts/*.sh", text)
 
     def test_operator_gui_uses_only_guarded_topics_and_safe_limits(self):
-        gui = MOTION_CMD / "motor_controller" / "yuzu_operator_gui.py"
+        gui = MOTION_CMD / "motor_controller" / "yuzu_peeler_gui.py"
         text = gui.read_text(encoding="utf-8")
 
         self.assertIn('MOTOR1_TOPIC = "/motor1_position_controller/commands"', text)
@@ -208,7 +208,7 @@ class Azd3aEthercatConfigFileTests(unittest.TestCase):
         self.assertIn("AXIS1_MAX_MM = 400.0", text)
         self.assertIn("AXIS1_INCREMENT_MM = 0.0012", text)
         self.assertIn("AXIS1_VELOCITY_MM_S = 480.0", text)
-        self.assertIn("AXIS1_ACCELERATION_MM_S2 = 160.0", text)
+        self.assertIn("AXIS1_ACCELERATION_MM_S2 = 480.0", text)
         self.assertIn("AXIS2_GUI_MAX_RPM = 332.8", text)
         self.assertIn("AXIS2_ACCELERATION_RPM_S = 665.6", text)
         self.assertIn("MOTOR4_MIN_MM = 0.0", text)
@@ -216,8 +216,11 @@ class Azd3aEthercatConfigFileTests(unittest.TestCase):
         self.assertIn("MOTOR3_MAX_MM = 20.0", text)
         self.assertIn("MOTOR4_INCREMENT_MM = 0.0001", text)
         self.assertIn("MOTOR3_4_VELOCITY_MM_S = 32.0", text)
-        self.assertIn("MOTOR3_ACCELERATION_MM_S2 = 160.0", text)
-        self.assertIn("MOTOR4_ACCELERATION_MM_S2 = 160.0", text)
+        self.assertIn("MOTOR3_ACCELERATION_MM_S2 = 64.0", text)
+        self.assertIn("MOTOR4_ACCELERATION_MM_S2 = 64.0", text)
+        self.assertIn("MOTOR5_ACCELERATION_RPM_S = 240.0", text)
+        self.assertIn("MOTOR6_ACCELERATION_RPM_S = 96.0", text)
+        self.assertIn('self.motor6_entry.insert(0, f"{MOTOR6_GUI_MAX_MM_S:.3f}")', text)
         self.assertIn("MOTOR5_MAX_ANGLE_DEG = 180.0", text)
         self.assertIn("MOTOR5_HARDWARE_STEP_DEG = 0.0018", text)
         self.assertIn("Set current position as zero", text)
@@ -236,7 +239,9 @@ class Azd3aEthercatConfigFileTests(unittest.TestCase):
         self.assertIn("checked_motor6_speed_mm_s", text)
         self.assertIn("get_subscription_count()", text)
         self.assertIn("self.root.after(100, self.tick)", text)
-        self.assertIn("Show motion details", text)
+        self.assertIn('self.details_frame.pack(fill="x", pady=(6, 0))', text)
+        self.assertNotIn("before=self.command_status_label", text)
+        self.assertIn("Show hardware & motion details", text)
         self.assertIn("Step 1 · Motor 6 positioning distance (mm)", text)
         self.assertIn("Step 4.1 · Motor 2 CCW speed (rpm)", text)
         self.assertIn("Step 6 · Motor 1 home position (mm)", text)
@@ -250,7 +255,7 @@ class Azd3aEthercatConfigFileTests(unittest.TestCase):
         slave_text = (MOTION_CMD / "config" / "azd3a_motor1_motor2_slave.yaml").read_text(encoding="utf-8").lower()
         xacro_text = (MOTION_CMD / "urdf" / "azd3a_motor1_motor2.urdf.xacro").read_text(encoding="utf-8")
         controller_text = (MOTION_CMD / "config" / "azd3a_motor1_motor2_controllers.yaml").read_text(encoding="utf-8")
-        launch_text = (MOTION_CMD / "launch" / "azd3a_motor1_motor2_gui.launch.py").read_text(encoding="utf-8")
+        launch_text = (MOTION_CMD / "launch" / "yuzu_peeler.launch.py").read_text(encoding="utf-8")
 
         for pdo in ("0x1600", "0x1612", "0x1620", "0x1a00", "0x1a11", "0x1a20"):
             self.assertRegex(slave_text, rf"index:\s*{pdo}")
@@ -288,8 +293,8 @@ class Azd3aEthercatConfigFileTests(unittest.TestCase):
         self.assertIn('executable="azd3a_motor3_position_guard"', launch_text)
         self.assertIn('executable="azd3a_motor6_conveyor_guard"', launch_text)
         self.assertIn('"max_rpm": 48.0', launch_text)
-        self.assertIn('"max_acceleration_rpm_s": 200.0', launch_text)
-        self.assertIn('executable="yuzu_operator_gui"', launch_text)
+        self.assertIn('"max_acceleration_rpm_s": 96.0', launch_text)
+        self.assertIn('executable="yuzu_peeler_gui"', launch_text)
 
     def test_motor3_combined_guard_is_absolute_feedback_synchronized_and_bounded(self):
         guard_text = (
@@ -303,7 +308,7 @@ class Azd3aEthercatConfigFileTests(unittest.TestCase):
             "MAX_POSITION_MM = 20.0",
             "MIN_INCREMENT_MM = 0.0001",
             "MAX_VELOCITY_M_S = 0.032",
-            "MAX_ACCELERATION_M_S2 = 0.160",
+            "MAX_ACCELERATION_M_S2 = 0.064",
             'DynamicJointState, "/dynamic_joint_states"',
             "if not self.operator_command_received:",
         ):
@@ -323,7 +328,7 @@ class Azd3aEthercatConfigFileTests(unittest.TestCase):
             "HARD_MAX_VELOCITY_M_S = 0.040",
             "HARD_MAX_ACCELERATION_M_S2 = 0.2",
             "REQUIRED_VELOCITY_M_S = 0.032",
-            "DEFAULT_ACCELERATION_M_S2 = 0.160",
+            "DEFAULT_ACCELERATION_M_S2 = 0.064",
             "target_position = target_mm / 1000.0",
         ):
             self.assertIn(expected, guard_text)
@@ -353,7 +358,7 @@ class Azd3aEthercatConfigFileTests(unittest.TestCase):
         for expected in (
             "HARD_MAX_RPM = 60.0",
             "COMMISSIONING_MAX_RPM = 48.0",
-            "DEFAULT_ACCELERATION_RPM_S = 200.0",
+            "DEFAULT_ACCELERATION_RPM_S = 96.0",
             "COMMAND_TIMEOUT_S = 0.5",
             'PUBLIC_TOPIC = "/motor6_conveyor/commands_rpm"',
             'RAW_TOPIC = "/motor6_raw_velocity_controller/commands"',
@@ -389,7 +394,7 @@ class Azd3aEthercatConfigFileTests(unittest.TestCase):
             'INTERFACE_NAME = "motor5_position"',
             "MAX_ANGLE_DEG = 180.0",
             "MAX_VELOCITY_RPM = 120.0",
-            "MAX_ACCELERATION_RPM_S = 120.0",
+            "MAX_ACCELERATION_RPM_S = 240.0",
             "self.origin = None",
             "self.origin = self.measured_position",
             "def on_manual_step",
@@ -409,12 +414,12 @@ class Azd3aEthercatConfigFileTests(unittest.TestCase):
         for expected in (
             "HARD_MAX_POSITION_M = 0.400",
             "HARD_MAX_VELOCITY_M_S = 0.600",
-            "HARD_MAX_ACCELERATION_M_S2 = 0.2",
+            "MAX_CONFIGURED_ACCELERATION_M_S2 = 0.480",
             "MIN_TRAVEL_INCREMENT_M = 0.0000012",
             "DEFAULT_MIN_POSITION_M = 0.0",
             "DEFAULT_MAX_POSITION_M = 0.400",
             "DEFAULT_MAX_VELOCITY_M_S = 0.480",
-            "DEFAULT_MAX_ACCELERATION_M_S2 = 0.160",
+            "DEFAULT_MAX_ACCELERATION_M_S2 = 0.480",
             'PUBLIC_TOPIC = "/motor1_position_controller/commands"',
             'RAW_TOPIC = "/motor1_raw_position_controller/commands"',
             'LEGACY_PUBLIC_TOPIC = "/axis1_position_controller/commands"',
@@ -427,7 +432,7 @@ class Azd3aEthercatConfigFileTests(unittest.TestCase):
         self.assertIn('"min_position_m": 0.0', launch_text)
         self.assertIn('"max_position_m": 0.400', launch_text)
         self.assertIn('"max_velocity_m_s": 0.480', launch_text)
-        self.assertIn('"max_acceleration_m_s2": 0.160', launch_text)
+        self.assertIn('"max_acceleration_m_s2": 0.480', launch_text)
         self.assertIn("position_startup_tolerance\">0.00001", xacro_text)
 
     def test_motor4_commissioning_is_slave1_relative_and_tightly_bounded(self):
@@ -490,7 +495,7 @@ class Azd3aEthercatConfigFileTests(unittest.TestCase):
         self.assertIn("azd3a_slave1_passive_keepalive.yaml", xacro_text)
         self.assertIn("MAX_OFFSET_MM = 2.000", guard_text)
         self.assertIn("MAX_VELOCITY_M_S = 0.032", guard_text)
-        self.assertIn("MAX_ACCELERATION_M_S2 = 0.160", guard_text)
+        self.assertIn("MAX_ACCELERATION_M_S2 = 0.064", guard_text)
         self.assertIn('PUBLIC_TOPIC = "/motor3_commissioning/offset_mm"', guard_text)
         self.assertIn('executable="azd3a_motor3_commissioning_guard"', launch_text)
 

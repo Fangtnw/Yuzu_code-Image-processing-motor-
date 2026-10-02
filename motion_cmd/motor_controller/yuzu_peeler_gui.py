@@ -1,4 +1,4 @@
-"""Simple guarded operator panel for the Yuzu peeler commissioning system."""
+"""Operator GUI for guarded manual control and peeling-sequence operation."""
 
 import math
 import tkinter as tk
@@ -24,7 +24,7 @@ AXIS1_MAX_MM = 400.0
 AXIS1_INCREMENT_MM = 0.0012
 AXIS1_PARK_MM = 0.0
 AXIS1_VELOCITY_MM_S = 480.0  # 80% of the 600 mm/s actuator rating
-AXIS1_ACCELERATION_MM_S2 = 160.0  # 80% of the 200 mm/s^2 guard ceiling
+AXIS1_ACCELERATION_MM_S2 = 480.0  # reaches 480 mm/s in 1 s; validate on the loaded vertical assembly
 AXIS2_GUI_MAX_RPM = 332.8  # 80% of the 416 rpm output rating
 AXIS2_ACCELERATION_RPM_S = 665.6  # proportional software ramp; no catalog max
 MOTOR4_MIN_MM = 0.0
@@ -34,14 +34,14 @@ MOTOR3_MIN_MM = 0.0
 MOTOR3_MAX_MM = 20.0
 MOTOR3_INCREMENT_MM = 0.0001
 MOTOR3_4_VELOCITY_MM_S = 32.0  # 80% of the DR28 maximum 40 mm/s
-MOTOR3_ACCELERATION_MM_S2 = 160.0  # 80% of DR28 maximum 0.2 m/s^2
-MOTOR4_ACCELERATION_MM_S2 = 160.0
+MOTOR3_ACCELERATION_MM_S2 = 64.0  # reaches 32 mm/s in 0.5 s; DR28 max is 200 mm/s^2
+MOTOR4_ACCELERATION_MM_S2 = 64.0
 MOTOR5_MAX_ANGLE_DEG = 180.0
 MOTOR5_HARDWARE_STEP_DEG = 0.0018
 MOTOR5_VELOCITY_RPM = 120.0  # 80% of the FC20 output rating, 150 rpm
-MOTOR5_ACCELERATION_RPM_S = 120.0  # proportional software ramp; no catalog max
+MOTOR5_ACCELERATION_RPM_S = 240.0  # reaches 120 rpm in 0.5 s; software ramp, no catalog max
 MOTOR6_GUI_MAX_RPM = 48.0  # 80% of the PS50 output rating, 60 rpm
-MOTOR6_ACCELERATION_RPM_S = 200.0  # proportional software ramp; no catalog max
+MOTOR6_ACCELERATION_RPM_S = 96.0  # reaches 48 rpm in 0.5 s; software ramp, no catalog max
 MOTOR6_PULLEY_DIAMETER_MM = 30.0
 MOTOR6_GUI_MAX_MM_S = MOTOR6_GUI_MAX_RPM * math.pi * MOTOR6_PULLEY_DIAMETER_MM / 60.0
 MOTOR6_STEP_MAX_MM = 1000.0
@@ -74,9 +74,20 @@ def checked_axis2_rpm(requested_rpm: float) -> float:
     return requested_rpm
 
 
-def checked_rotary_ramp(acceleration: float, deceleration: float, maximum: float) -> tuple[float, float]:
+def checked_rotary_ramp(
+    acceleration: float,
+    deceleration: float,
+    maximum: float,
+    requested_rpm: float,
+) -> tuple[float, float]:
     if not all(math.isfinite(value) and 0.0 < value <= maximum for value in (acceleration, deceleration)):
         raise ValueError(f"Acceleration and deceleration must be within 0..{maximum:.1f} rpm/s")
+    minimum = abs(requested_rpm) / 0.5
+    if acceleration + 1e-9 < minimum or deceleration + 1e-9 < minimum:
+        raise ValueError(
+            f"At {abs(requested_rpm):.1f} rpm, acceleration and deceleration must be at least "
+            f"{minimum:.1f} rpm/s to meet the 0.5 s ramp requirement"
+        )
     return acceleration, deceleration
 
 
@@ -125,7 +136,7 @@ def checked_motor6_distance_mm(requested_mm: float) -> float:
 
 class YuzuOperatorNode(Node):
     def __init__(self) -> None:
-        super().__init__("yuzu_operator_gui")
+        super().__init__("yuzu_peeler_gui")
         self.motor1_publisher = self.create_publisher(Float64MultiArray, MOTOR1_TOPIC, 10)
         self.motor2_publisher = self.create_publisher(Float64MultiArray, MOTOR2_TOPIC, 10)
         self.motor3_publisher = self.create_publisher(Float64, MOTOR3_TOPIC, 10)
@@ -562,7 +573,7 @@ class YuzuOperatorGui:
         frame = ttk.LabelFrame(parent, text="Motor 2 — Yuzu rotation", padding=12)
         frame.grid(row=1, column=0, sticky="nsew", padx=4, pady=4)
         ttk.Label(frame, text=f"Operating speed cap: {AXIS2_GUI_MAX_RPM:.1f} rpm").pack(anchor="w")
-        ttk.Label(frame, text="Software ramp: 332.8 rpm/s default · adjustable to 665.6 rpm/s").pack(anchor="w")
+        ttk.Label(frame, text="Acc/dec: 665.6 rpm/s at speed cap · 0.5 s ramp (adjustable, guarded)").pack(anchor="w")
         self.axis2_feedback = tk.StringVar(value="Feedback: —")
         ttk.Label(frame, textvariable=self.axis2_feedback, style="Status.TLabel").pack(
             anchor="w", pady=(10, 12)
@@ -577,10 +588,10 @@ class YuzuOperatorGui:
         profile.pack(fill="x", pady=(4, 0))
         ttk.Label(profile, text="Acc / dec (rpm/s)").pack(side="left")
         self.axis2_accel_entry = ttk.Entry(profile, width=7)
-        self.axis2_accel_entry.insert(0, "332.8")
+        self.axis2_accel_entry.insert(0, f"{AXIS2_ACCELERATION_RPM_S:.1f}")
         self.axis2_accel_entry.pack(side="right", padx=(3, 0))
         self.axis2_decel_entry = ttk.Entry(profile, width=7)
-        self.axis2_decel_entry.insert(0, "332.8")
+        self.axis2_decel_entry.insert(0, f"{AXIS2_ACCELERATION_RPM_S:.1f}")
         self.axis2_decel_entry.pack(side="right")
         self.axis2_direction = tk.IntVar(value=1)
         directions = ttk.Frame(frame)
@@ -640,7 +651,9 @@ class YuzuOperatorGui:
         row.pack(fill="x")
         ttk.Label(row, text="Belt speed (mm/s)").pack(side="left")
         self.motor6_entry = ttk.Entry(row, width=12)
-        self.motor6_entry.insert(0, f"{MOTOR6_GUI_MAX_MM_S:.1f}")
+        # Keep the editable value at enough precision not to round above the
+        # exact 48 rpm-derived cap (75.398223... mm/s).
+        self.motor6_entry.insert(0, f"{MOTOR6_GUI_MAX_MM_S:.3f}")
         self.motor6_entry.pack(side="right")
         distance_row = ttk.Frame(frame)
         distance_row.pack(fill="x", pady=(4, 0))
@@ -652,10 +665,10 @@ class YuzuOperatorGui:
         profile.pack(fill="x", pady=(4, 0))
         ttk.Label(profile, text="Acc / dec (rpm/s)").pack(side="left")
         self.motor6_accel_entry = ttk.Entry(profile, width=7)
-        self.motor6_accel_entry.insert(0, "200.0")
+        self.motor6_accel_entry.insert(0, f"{MOTOR6_ACCELERATION_RPM_S:.1f}")
         self.motor6_accel_entry.pack(side="right", padx=(3, 0))
         self.motor6_decel_entry = ttk.Entry(profile, width=7)
-        self.motor6_decel_entry.insert(0, "200.0")
+        self.motor6_decel_entry.insert(0, f"{MOTOR6_ACCELERATION_RPM_S:.1f}")
         self.motor6_decel_entry.pack(side="right")
         step_row = ttk.Frame(frame)
         step_row.pack(fill="x", pady=(8, 0))
@@ -834,8 +847,10 @@ class YuzuOperatorGui:
         ttk.Label(
             frame,
             text=(
-                "Acceleration/deceleration are symmetric settings. Motor 3/4 use 160 mm/s² "
-                "(80% of the actuator rating); other values are software ramps, not rated hardware limits."
+                "Motor 1 ramps to/from its operating cap in 1 s; Motors 2–6 use 0.5 s ramps. "
+                "Motor 3/4 use 64 mm/s² (below their 200 mm/s² rating); other values are software ramps, "
+                "not manufacturer acceleration ratings. Short moves may brake before reaching the cap. "
+                "Within Motor 1's 400 mm stroke, a rest-to-rest move cannot reach 480 mm/s and also stop."
             ),
         ).grid(row=len(rows) + 1, column=0, columnspan=6, sticky="w", pady=(7, 0))
         ttk.Label(
@@ -846,8 +861,9 @@ class YuzuOperatorGui:
                 "Linear Motors 3/4 retain 20 mm project travel guards (30 mm catalog stroke). "
                 f"Motor 6 belt speed at the 30 mm pulley is {MOTOR6_GUI_MAX_MM_S:.1f} mm/s at the "
                 f"48 rpm operating cap (hardware max: {60.0 * math.pi * MOTOR6_PULLEY_DIAMETER_MM / 60.0:.1f} mm/s). "
-                "Rotary acceleration/deceleration values are software ramps scaled from prior settings; "
-                "the rotary product pages do not specify maximum acceleration. Motor 5 has no intrinsic angular stop."
+                "Motor 1's 480 mm/s² and rotary acceleration/deceleration settings are software profiles "
+                "(rotary product pages do not specify max acceleration); validate the loaded machine. "
+                "Motor 5 has no intrinsic angular stop."
             ),
             wraplength=1200,
             justify="left",
@@ -857,7 +873,9 @@ class YuzuOperatorGui:
     def toggle_motion_details(self) -> None:
         self.details_visible = not self.details_visible
         if self.details_visible:
-            self.details_frame.pack(fill="x", pady=(6, 0), before=self.command_status_label)
+            # The details frame and button share manual_tab; the status label
+            # belongs to outer, so it cannot be used as pack's before sibling.
+            self.details_frame.pack(fill="x", pady=(6, 0))
             self.details_button.configure(text="Hide hardware & motion details ▴")
         else:
             self.details_frame.pack_forget()
@@ -934,6 +952,7 @@ class YuzuOperatorGui:
                 float(self.axis2_accel_entry.get()),
                 float(self.axis2_decel_entry.get()),
                 AXIS2_ACCELERATION_RPM_S,
+                rpm,
             )
         except ValueError as error:
             messagebox.showerror("Invalid Motor 2 command", str(error))
@@ -1041,6 +1060,7 @@ class YuzuOperatorGui:
                 float(self.motor6_accel_entry.get()),
                 float(self.motor6_decel_entry.get()),
                 MOTOR6_ACCELERATION_RPM_S,
+                rpm,
             )
         except ValueError as error:
             messagebox.showerror("Invalid Motor 6 command", str(error))
@@ -1085,6 +1105,7 @@ class YuzuOperatorGui:
                 float(self.motor6_accel_entry.get()),
                 float(self.motor6_decel_entry.get()),
                 MOTOR6_ACCELERATION_RPM_S,
+                speed_rpm,
             )
         except ValueError as error:
             messagebox.showerror("Invalid Motor 6 step", str(error))

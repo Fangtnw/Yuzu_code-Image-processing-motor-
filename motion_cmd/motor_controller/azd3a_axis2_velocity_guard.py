@@ -68,6 +68,8 @@ class Axis2VelocityGuard(Node):
                 f"+/-{self.max_rpm:.3f} rpm commissioning limit"
             )
             return
+        acceleration = self.acceleration_rpm_s
+        deceleration = self.deceleration_rpm_s
         if len(message.data) == 3:
             acceleration = float(message.data[1])
             deceleration = float(message.data[2])
@@ -77,6 +79,21 @@ class Axis2VelocityGuard(Node):
             if not 0.0 < deceleration <= self.max_acceleration_rpm_s:
                 self.get_logger().error("REJECTED: deceleration exceeds the configured guard limit")
                 return
+        minimum_acceleration = abs(requested_rpm) / 0.5
+        minimum_deceleration = max(abs(requested_rpm), abs(self.output_rpm)) / 0.5
+        if acceleration + 1e-9 < minimum_acceleration:
+            self.get_logger().error(
+                f"REJECTED: at {abs(requested_rpm):.3f} rpm, acceleration must be at least "
+                f"{minimum_acceleration:.3f} rpm/s for a 0.5 s ramp"
+            )
+            return
+        if deceleration + 1e-9 < minimum_deceleration:
+            self.get_logger().error(
+                f"REJECTED: deceleration must be at least {minimum_deceleration:.3f} rpm/s "
+                "to stop the present/target speed within 0.5 s"
+            )
+            return
+        if len(message.data) == 3:
             self.acceleration_rpm_s = acceleration
             self.deceleration_rpm_s = deceleration
         self.target_rpm = requested_rpm

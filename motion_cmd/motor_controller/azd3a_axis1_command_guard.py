@@ -10,11 +10,12 @@ from std_msgs.msg import Float64MultiArray
 
 # Manufacturer envelope for Motor 1's EZSM3LD040AZAK linear slide.
 HARD_MIN_POSITION_M = 0.0
-# Acceleration remains a deliberately conservative software cap until the
-# assembled mechanism/load is commissioned.
+# No maximum acceleration is published on the actuator product page. This
+# software ceiling limits launch overrides; the active default is the gentler
+# one-second ramp to the 80% speed cap.
 HARD_MAX_POSITION_M = 0.400
 HARD_MAX_VELOCITY_M_S = 0.600
-HARD_MAX_ACCELERATION_M_S2 = 0.2
+MAX_CONFIGURED_ACCELERATION_M_S2 = 0.480
 MIN_TRAVEL_INCREMENT_M = 0.0000012
 
 # Requirement-based assembled-machine defaults. The full 400 mm actuator
@@ -23,7 +24,7 @@ MIN_TRAVEL_INCREMENT_M = 0.0000012
 DEFAULT_MIN_POSITION_M = 0.0
 DEFAULT_MAX_POSITION_M = 0.400
 DEFAULT_MAX_VELOCITY_M_S = 0.480
-DEFAULT_MAX_ACCELERATION_M_S2 = 0.160
+DEFAULT_MAX_ACCELERATION_M_S2 = 0.480
 UPDATE_RATE_HZ = 200.0
 PUBLIC_TOPIC = "/motor1_position_controller/commands"
 LEGACY_PUBLIC_TOPIC = "/axis1_position_controller/commands"
@@ -79,8 +80,8 @@ class Axis1CommandGuard(Node):
             raise ValueError("Configured position range exceeds the 0..400 mm stroke")
         if not 0.0 < self.max_velocity <= HARD_MAX_VELOCITY_M_S:
             raise ValueError("Configured velocity exceeds the 600 mm/s specification")
-        if not 0.0 < self.max_acceleration <= HARD_MAX_ACCELERATION_M_S2:
-            raise ValueError("Configured acceleration exceeds the 0.2 m/s^2 specification")
+        if not 0.0 < self.max_acceleration <= MAX_CONFIGURED_ACCELERATION_M_S2:
+            raise ValueError("Configured acceleration exceeds the guarded Motor 1 profile")
 
     def on_joint_state(self, message: JointState) -> None:
         try:

@@ -1,4 +1,4 @@
-"""Run Motors 1 through 6 across two AZD3A slaves with the operator GUI."""
+"""Launch the integrated six-motor Yuzu peeler control system and GUI."""
 
 from pathlib import Path
 
@@ -83,7 +83,7 @@ def generate_launch_description() -> LaunchDescription:
                 "min_position_m": 0.0,
                 "max_position_m": 0.400,
                 "max_velocity_m_s": 0.480,
-                "max_acceleration_m_s2": 0.160,
+                "max_acceleration_m_s2": 0.480,
             }],
             output="screen",
         ),
@@ -112,7 +112,7 @@ def generate_launch_description() -> LaunchDescription:
             executable="azd3a_motor6_conveyor_guard",
             parameters=[{
                 "max_rpm": 48.0,
-                "max_acceleration_rpm_s": 200.0,
+                "max_acceleration_rpm_s": 96.0,
                 "command_timeout_s": 0.5,
             }],
             output="screen",
@@ -128,7 +128,7 @@ def generate_launch_description() -> LaunchDescription:
             parameters=[robot_description],
             output="screen",
         ),
-        Node(package="motor_controller", executable="yuzu_operator_gui", output="screen"),
+        Node(package="motor_controller", executable="yuzu_peeler_gui", output="screen"),
         RegisterEventHandler(
             OnProcessExit(
                 target_action=control_node,

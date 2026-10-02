@@ -40,3 +40,7 @@ This selects the `AZD3A-KED rev0301` device entry in the ESI.
 These files remain copyright Oriental Motor Co., Ltd. They are included here
 as unmodified technical dependencies; consult the vendor website for updated
 versions and applicable terms.
+
+For installed motor model numbers, manufacturer speed sources, the project's
+80% operating caps, and calculated 0.5-second software ramps, see
+[`MOTOR_SPEED_SOURCES.md`](MOTOR_SPEED_SOURCES.md).

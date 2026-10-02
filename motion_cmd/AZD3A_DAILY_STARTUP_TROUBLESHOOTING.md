@@ -2,7 +2,7 @@
 
 Use this file after reboot and whenever EtherCAT or an AZD3A axis does not
 start normally. Commands assume Ubuntu 22.04, IgH EtherCAT at `/opt/etherlab`,
-dedicated EtherCAT NIC, and ROS 2 Humble workspace `~/kyutech/azd3a_ws`.
+dedicated EtherCAT NIC, and ROS 2 Humble workspace `~/yuzu_ws`.
 
 ## Safety first
 
@@ -43,7 +43,7 @@ Then source ROS in every new terminal:
 
 ```bash
 source /opt/ros/humble/setup.bash
-source ~/kyutech/azd3a_ws/install/setup.bash
+source ~/yuzu_ws/install/setup.bash
 ```
 
 ## Known launch commands
@@ -67,32 +67,31 @@ ros2 launch motor_controller azd3a_axis2_tiny_spin.launch.py
 ```
 
 The Motor 2 operating ceiling is 332.8 rpm (80% of its 416 rpm output maximum)
-with a 665.6 rpm/s software ramp ceiling. The standalone launch uses the same
+with 665.6 rpm/s acceleration/deceleration (0.5 s to/from the cap). The standalone launch uses the same
 defaults. For maintenance or staged recommissioning, set lower ceilings
 explicitly and increase in measured steps.
 
 ```bash
 # Intermediate validation (recommended before the final range)
 ros2 launch motor_controller azd3a_axis2_tiny_spin.launch.py \
-  max_rpm:=100 max_acceleration_rpm_s:=25
+  max_rpm:=100 max_acceleration_rpm_s:=200
 
 # Requirement tests, only after the previous level passes
 ros2 launch motor_controller azd3a_axis2_tiny_spin.launch.py \
-  max_rpm:=200 max_acceleration_rpm_s:=25
+  max_rpm:=200 max_acceleration_rpm_s:=400
 
 ros2 launch motor_controller azd3a_axis2_tiny_spin.launch.py \
-  max_rpm:=250 max_acceleration_rpm_s:=25
+  max_rpm:=250 max_acceleration_rpm_s:=500
 ```
 
 For normal combined Motor 1/2/3/4/6 GUI operation:
 
 ```bash
-ros2 launch motor_controller azd3a_motor1_motor2_gui.launch.py
+ros2 launch motor_controller yuzu_peeler.launch.py
 ```
 
-Despite the retained launch filename, this starts all currently integrated
-machine axes: Motors 1, 2, and 3 on slave 0, plus Motor 4 Axis 1 and Motor 6
-Axis 3 on slave 1. The expected active controllers are:
+This starts all integrated machine axes: Motors 1, 2, and 3 on slave 0, plus
+Motors 4, 5, and 6 on slave 1. The expected active controllers are:
 
 ```text
 joint_state_broadcaster
@@ -100,17 +99,20 @@ motor1_raw_position_controller
 motor2_raw_velocity_controller
 motor3_raw_position_controller
 motor4_raw_position_controller
+motor5_raw_position_controller
 motor6_raw_velocity_controller
 ```
 
 Motor 5 and Motor 6 are included in the combined GUI. Motor 6 uses guarded
-topic `/motor6_conveyor/commands_rpm`, a +/-48 output-rpm ceiling, 200 rpm/s
+topic `/motor6_conveyor/commands_rpm`, a +/-48 output-rpm ceiling, 96 rpm/s
 software ramp, and 0.5-second watchdog. Positive RPM is the physically verified
 forward direction. The GUI accepts belt speed in mm/s and relative distance
 steps; 48 rpm gives approximately 75.40 mm/s on the 30 mm pulley.
 
 Current linear speed caps are Motor 1 at 480 mm/s and Motors 3/4 at 32 mm/s,
-all at 80% of their published maximums. Their GUI ramps are 160 mm/s^2. Motor 1
+all at 80% of their published maximums. Motor 1 uses a 480 mm/s² ramp (1 s to
+or from cap); Motors 3/4 use 64 mm/s² (0.5 s to or from cap). These times
+require a sufficiently long move. Motor 1
 is guarded to 0..400 mm and Motors 3/4 to 0..20 mm. Motor 3 uses the
 custom `motor3_position` interface and `/dynamic_joint_states` feedback. Use
 the GUI's **Show motion details** control to review range, velocity,
@@ -132,9 +134,9 @@ timeout 16s ros2 topic pub --rate 10 \
 ```
 
 When `timeout` stops the publisher, the 0.5-second watchdog commands zero and
-the guard applies the configured deceleration ramp. With 25 rpm/s, allow 4,
-8, and 10 seconds to stop from 100, 200, and 250 rpm respectively before
-stopping the launch. Confirm `/joint_states` velocity is `0.0`, then stop ROS
+the guard applies the configured deceleration ramp. With the matching ramps
+above, deceleration from the selected speed takes at most 0.5 seconds. Confirm
+`/joint_states` velocity is `0.0`, then stop ROS
 and read Axis 2 alarm `0x683F`; expected value is `0x0000`.
 
 Important correction (2026-08-14): the earlier RPM runs omitted the FC7.2
@@ -142,10 +144,11 @@ gearhead from the ROS conversion. They verified motion and stopping, not
 200-250 rpm at the machine output. Axis 2 must be recommissioned with the
 corrected 72,000-count/output-revolution scaling.
 
-Final corrected status: true 25, 100, 200, and 250 machine-output rpm tests
-passed. A 250 output-rpm/s acceleration also passed on the current test
-hardware, but it is an empirical commissioning value and must be revalidated
-with the final load installed.
+Historical validation: true 25, 100, 200, and 250 machine-output rpm tests
+passed. A 250 output-rpm/s acceleration also passed on the test hardware.
+Current GUI and guard settings are listed in `MOTOR_SPEED_SOURCES.md`; validate
+the current higher acceleration profile under controlled, unloaded conditions
+before applying it to the assembled mechanism.
 
 Axis 3 guarded RPM control:
 
@@ -291,14 +294,14 @@ with `Ctrl+C`, confirm the slave is visible, and retry the SDO command.
 
 ```bash
 source /opt/ros/humble/setup.bash
-source ~/kyutech/azd3a_ws/install/setup.bash
+source ~/yuzu_ws/install/setup.bash
 ros2 pkg prefix motor_controller
 ```
 
 If necessary, rebuild:
 
 ```bash
-cd ~/kyutech/azd3a_ws
+cd ~/yuzu_ws
 source /opt/ros/humble/setup.bash
 colcon build --symlink-install --packages-select motor_controller
 source install/setup.bash

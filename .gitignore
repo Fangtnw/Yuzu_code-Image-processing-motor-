@@ -10,6 +10,8 @@ __pycache__/
 *.egg
 .eggs/
 dist/
+company_review/export/
+company_review/*.tar.gz
 
 # ── Editor / OS ─────────────────────────────────
 .vscode/

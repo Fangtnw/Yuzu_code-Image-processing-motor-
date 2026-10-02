@@ -4,7 +4,7 @@
   <name>motor_controller</name>
   <version>0.1.0</version>
   <description>Guarded ROS 2 control, EtherCAT mappings, and operator GUI for the six-motor Yuzu peeler.</description>
-  <maintainer email="fang@users.noreply.github.com">Yuzu Peeler Team</maintainer>
+  <maintainer email="maintainer@example.invalid">Yuzu Peeler Team</maintainer>
   <license>MIT</license>
 
   <depend>rclpy</depend>
@@ -13,6 +13,9 @@
   <depend>control_msgs</depend>
   <exec_depend>ament_index_python</exec_depend>
   <exec_depend>controller_manager</exec_depend>
+  <exec_depend>ethercat_driver</exec_depend>
+  <exec_depend>ethercat_generic_cia402_drive</exec_depend>
+  <exec_depend>velocity_controllers</exec_depend>
   <exec_depend>joint_state_broadcaster</exec_depend>
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>

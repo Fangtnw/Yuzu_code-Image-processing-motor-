@@ -3,7 +3,7 @@
 ROS 2 Humble application for the six-motor Yuzu peeler prototype. The project
 uses `ros2_control`, the ICube EtherCAT driver, CiA-402 drives, and an IgH
 EtherCAT master. The operator GUI provides guarded manual control and an
-operator-advanced peeling sequence.
+operator-configurable peeling sequence.
 
 ## Scope and safety
 
@@ -13,7 +13,7 @@ power cutoff accessible, test with the mechanism clear, and run only one
 EtherCAT ROS launch at a time.
 
 Motion is intentionally locked until the GUI sees fresh feedback and all six
-drives report CiA-402 Operation Enabled (`0x0567` pattern).
+drives report CiA-402 Operation Enabled (`(statusword & 0x006F) == 0x0027`).
 
 ## Repository layout
 
@@ -22,7 +22,8 @@ drives report CiA-402 Operation Enabled (`0x0567` pattern).
 - `scripts/` — reproducible workspace setup and startup helpers.
 - `tests/` — offline configuration and command tests; no motors are required.
 - `vendor/` — supplied Oriental Motor and MISUMI reference documents.
-- `progress.md` — dated engineering record and commissioning history.
+- `patches/` — versioned extension required by the multi-axis EtherCAT driver.
+- `LICENSE` and `THIRD_PARTY_NOTICES.md` — licensing and reference-document scope.
 - `UBUNTU_ETHERCAT_SETUP_GUIDE.md` — kernel/module/NIC setup for a new Ubuntu PC.
 
 ## Supported deployment
@@ -40,19 +41,18 @@ Read the EtherCAT setup guide before connecting power.
 3. Clone this repository and run:
 
    ```bash
-   cd Yuzu_code-Image-processing-motor-
-   ./scripts/setup_workspace.sh --workspace "$HOME/kyutech/azd3a_ws"
+   cd /path/to/YuzuPeeler-MotorControl
+   ./scripts/setup_workspace.sh --workspace "$HOME/yuzu_ws"
    ```
 
-   The script imports the pinned external ROS dependency, links this package
-   into the workspace, installs rosdep dependencies, and performs a Release
-   build. It does not modify EtherCAT kernel modules or system NIC settings.
+   The script imports and patches the pinned external ROS dependency, links this package
+   into the workspace, installs rosdep dependencies, and builds the application and driver dependencies in Release mode. It does not modify EtherCAT kernel modules or system NIC settings.
 
 4. Configure `/etc/sysconfig/ethercat`, udev permissions, and the `ethercat`
    group for the actual PC. Then start the system with:
 
    ```bash
-   ./scripts/start_yuzu.sh --workspace "$HOME/kyutech/azd3a_ws"
+   ./scripts/start_yuzu_peeler.sh --workspace "$HOME/yuzu_ws"
    ```
 
    The start helper sources ROS and launches the integrated GUI; it does not
@@ -62,10 +62,10 @@ Read the EtherCAT setup guide before connecting power.
 
 ```bash
 source /opt/ros/humble/setup.bash
-cd "$HOME/kyutech/azd3a_ws"
+cd "$HOME/yuzu_ws"
 colcon build --packages-select motor_controller --symlink-install
 source install/setup.bash
-ros2 launch motor_controller azd3a_motor1_motor2_gui.launch.py
+ros2 launch motor_controller yuzu_peeler.launch.py
 ```
 
 Verify the EtherCAT link first:
@@ -106,9 +106,12 @@ should use the `motor*` names.
 | 5 | peeler index | degrees from runtime zero | ±180°, 120 rpm (80% of 150 rpm output maximum) |
 | 6 | conveyor | mm/s and relative distance steps | 75.4 mm/s (48 rpm, 80% of 60 rpm maximum), 30 mm default step |
 
-The linear acceleration/deceleration ramps use 160 mm/s² (80% of the DR28
-0.2 m/s² maximum acceleration; Motor 1's equivalent is an 80% software guard
-setting). Rotary ramps are software profiles scaled from the previously
-configured values because the rotary motor product specifications do not give
-maximum acceleration ratings. Confirm the hardware envelope in
-`motion_cmd/AZD3A_HARDWARE.md` and the GUI details panel.
+Motor 1 ramps to/from its 480 mm/s cap in 1 s using 480 mm/s². Motors 2–6 use
+0.5 s profiles: Motor 2 665.6 rpm/s; Motors 3/4 64 mm/s²; Motor 5 240 rpm/s;
+Motor 6 96 rpm/s. Motors 3/4 remain below their published 200 mm/s²
+acceleration maximum. These are software profiles; Motor 1's ramp must be
+validated on the loaded vertical assembly. Short position moves can brake
+before attaining the speed cap. A Motor 1 rest-to-rest move needs about 480 mm
+to accelerate to 480 mm/s and brake at this ramp, so the guarded 400 mm stroke
+cannot reach that cap and stop in-range from rest. The manufacturer source register is
+`vendor/oriental_motor/MOTOR_SPEED_SOURCES.md`.

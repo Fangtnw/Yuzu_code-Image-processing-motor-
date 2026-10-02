@@ -11,7 +11,7 @@ PUBLIC_TOPIC = "/motor6_conveyor/commands_rpm"
 RAW_TOPIC = "/motor6_raw_velocity_controller/commands"
 HARD_MAX_RPM = 60.0
 COMMISSIONING_MAX_RPM = 48.0
-DEFAULT_ACCELERATION_RPM_S = 200.0
+DEFAULT_ACCELERATION_RPM_S = 96.0
 COMMAND_TIMEOUT_S = 0.5
 UPDATE_PERIOD_S = 0.005
 
@@ -59,6 +59,8 @@ class Motor6ConveyorGuard(Node):
                 f"+/-{self.max_rpm:.3f} rpm commissioning limit"
             )
             return
+        acceleration = self.acceleration_rpm_s
+        deceleration = self.deceleration_rpm_s
         if len(message.data) == 3:
             acceleration = float(message.data[1])
             deceleration = float(message.data[2])
@@ -68,6 +70,21 @@ class Motor6ConveyorGuard(Node):
             if not 0.0 < deceleration <= self.max_acceleration_rpm_s:
                 self.get_logger().error("REJECTED Motor 6 deceleration: exceeds the configured guard limit")
                 return
+        minimum_acceleration = abs(requested_rpm) / 0.5
+        minimum_deceleration = max(abs(requested_rpm), abs(self.output_rpm)) / 0.5
+        if acceleration + 1e-9 < minimum_acceleration:
+            self.get_logger().error(
+                f"REJECTED Motor 6 acceleration: at {abs(requested_rpm):.3f} rpm, "
+                f"use at least {minimum_acceleration:.3f} rpm/s for a 0.5 s ramp"
+            )
+            return
+        if deceleration + 1e-9 < minimum_deceleration:
+            self.get_logger().error(
+                f"REJECTED Motor 6 deceleration: use at least {minimum_deceleration:.3f} rpm/s "
+                "to stop the present/target speed within 0.5 s"
+            )
+            return
+        if len(message.data) == 3:
             self.acceleration_rpm_s = acceleration
             self.deceleration_rpm_s = deceleration
         self.target_rpm = requested_rpm

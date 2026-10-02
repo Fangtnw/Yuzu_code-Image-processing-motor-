@@ -17,7 +17,7 @@ setup(
     install_requires=["setuptools"],
     zip_safe=True,
     maintainer="Yuzu Peeler Team",
-    maintainer_email="fang@users.noreply.github.com",
+    maintainer_email="maintainer@example.invalid",
     description="Guarded ROS 2 control, EtherCAT mappings, and operator GUI for the six-motor Yuzu peeler.",
     license="MIT",
     entry_points={
@@ -39,7 +39,7 @@ setup(
             f"azd3a_motor5_position_guard = {package_name}.azd3a_motor5_position_guard:main",
             f"azd3a_motor4_position_guard = {package_name}.azd3a_motor4_position_guard:main",
             f"azd3a_motor6_conveyor_guard = {package_name}.azd3a_motor6_conveyor_guard:main",
-            f"yuzu_operator_gui          = {package_name}.yuzu_operator_gui:main",
+            f"yuzu_peeler_gui            = {package_name}.yuzu_peeler_gui:main",
         ],
     },
 )

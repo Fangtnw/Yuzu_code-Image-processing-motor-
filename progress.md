@@ -1,14 +1,27 @@
 # EtherCAT Bring-up Progress
 
-Last updated: 2026-09-21
+Last updated: 2026-10-01
 
 ## Goal
 
-Bring up one Oriental Motor AZD3A-KED EtherCAT drive on native Ubuntu 22.04
-with ROS 2 Humble. First prove discovery and read-only communication; only then
-prepare a minimal one-axis `ros2_control` experiment.
+Develop and validate a portable ROS 2 Humble control application for the
+six-motor Yuzu peeler, including guarded motion, reproducible setup, and
+hardware-specific commissioning records.
 
-## Current Result
+## Current project snapshot (2026-10-01)
+
+The current operator executable is `yuzu_peeler_gui`; launch the integrated
+system with `yuzu_peeler.launch.py`. The integrated launch
+controls Motors 1–6. Catalog speed sources and the active 80% speed caps are
+recorded in `vendor/oriental_motor/MOTOR_SPEED_SOURCES.md`. Motor 1 now uses
+symmetric 480 mm/s² acceleration/deceleration to ramp to/from 480 mm/s in
+1 second; Motors 2–6 use 0.5-second profiles, subject to sufficient motion
+distance. The details dropdown was corrected to pack within its parent tab.
+The project suite passes 25 offline tests. Hardware validation of the latest
+speed/ramp changes remains outstanding; historical test results below describe
+the configuration in effect at the time of each entry.
+
+## Initial commissioning baseline (2026-09-21)
 
 On 2026-09-21 the drive was rewired to match the machine requirement order.
 Axis 1 now carries logical Motor 1, an `AZM46AK` parameterized for the
@@ -884,7 +897,7 @@ This subsection records the initial Motors 1/2 implementation. It is retained
 as history; the current Motors 1/2/4/6 state is recorded in the 2026-09-22
 session closeout below and in `motion_cmd/YUZU_OPERATOR_GUI.md`.
 
-A Tkinter/ROS 2 operator panel is available as `yuzu_operator_gui`. It provides
+A Tkinter/ROS 2 operator panel is available as `yuzu_peeler_gui`. It provides
 Motor 1 position and safe-park controls, Motor 2 guarded CW/CCW RPM and stop
 controls, live feedback, backend availability, count alignment, and stale-data
 indication. It publishes only to the existing guarded public topics. The GUI

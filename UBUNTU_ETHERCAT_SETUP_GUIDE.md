@@ -46,7 +46,7 @@ The layers have separate jobs:
 
 Commit these because they are project knowledge:
 
-- `progress.md`
+- `README.md`
 - this setup guide
 - `azd3a_ws.repos`
 - `motion_cmd/config/azd3a_ked_cia402_slave.yaml`
@@ -57,9 +57,9 @@ Commit these because they are project knowledge:
 
 Do not copy or commit:
 
-- `~/kyutech/azd3a_ws/build/`
-- `~/kyutech/azd3a_ws/install/`
-- `~/kyutech/azd3a_ws/log/`
+- `~/yuzu_ws/build/`
+- `~/yuzu_ws/install/`
+- `~/yuzu_ws/log/`
 - compiled kernel modules
 - `/dev/EtherCAT0`
 
@@ -73,8 +73,8 @@ System configuration also remains outside Git:
 - `/usr/local/etherlab` compatibility link
 - installed kernel modules under `/lib/modules/$(uname -r)/`
 
-The `.md`, `.repos`, source, YAML, and test files let another Codex session
-understand and reconstruct the Ubuntu environment. The generated workspace is
+The Markdown, `.repos`, source, YAML, and test files document how to reconstruct
+the Ubuntu environment. Generated workspace files are machine-specific and are
 not required for code review.
 
 ## 3. Hardware and Safety
@@ -133,8 +133,8 @@ ROS 2 Ubuntu installation instructions rather than copying another computer's
 Clone the pinned source used for this bring-up:
 
 ```bash
-mkdir -p ~/kyutech
-cd ~/kyutech
+mkdir -p ~/yuzu_dependencies
+cd ~/yuzu_dependencies
 git clone https://gitlab.com/etherlab.org/ethercat.git
 cd ethercat
 git checkout 6e60da92cd0bffd31d1207f76471d904eff4c2de
@@ -234,7 +234,7 @@ UPDOWN_INTERFACES="eno2"
 ```
 
 Interface names and MAC addresses can differ on every PC. Never blindly copy
-`eno2` or `a0:36:bc:31:3f:18` to a new machine.
+`eno2` or `02:00:00:00:00:01` to a new machine.
 
 ## 8. Allow ROS to Access the Master Without Root
 
@@ -299,16 +299,6 @@ Large listings can be saved instead of copied from terminal scrollback:
 
 ## 10. Recreate the ROS 2 Workspace
 
-Clone the main project repository first. From its root, import the pinned
-external dependency:
-
-```bash
-mkdir -p ~/kyutech/azd3a_ws/src
-cd ~/kyutech/azd3a_ws
-vcs import src < ~/kyutech/motor/Yuzu_code-Image-processing-motor-/azd3a_ws.repos
-ln -s ~/kyutech/motor/Yuzu_code-Image-processing-motor-/motion_cmd src/motion_cmd
-```
-
 The selected driver branch expects `/usr/local/etherlab`, so provide a
 compatibility link to the actual installation:
 
@@ -318,14 +308,20 @@ sudo ln -s /opt/etherlab /usr/local/etherlab
 
 If the link already exists and points to `/opt/etherlab`, leave it unchanged.
 
-Build:
+Initialize rosdep once if this PC has not used it before:
 
 ```bash
-cd ~/kyutech/azd3a_ws
-source /opt/ros/humble/setup.bash
-rosdep install --from-paths src --ignore-src -r -y
-colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
-source install/setup.bash
+sudo rosdep init
+rosdep update
+```
+
+If rosdep is already initialized, skip init and run update only.
+Extract the supplied bundle and, from its root, import and patch the pinned
+driver and build the complete runtime:
+
+```bash
+bash scripts/setup_workspace.sh --workspace "$HOME/yuzu_ws"
+source "$HOME/yuzu_ws/install/setup.bash"
 ```
 
 Verify:
@@ -347,7 +343,7 @@ mokutil --sb-state
 ip -brief link
 groups
 source /opt/ros/humble/setup.bash
-source ~/kyutech/azd3a_ws/install/setup.bash
+source ~/yuzu_ws/install/setup.bash
 ```
 
 EtherCAT:
@@ -370,7 +366,7 @@ ros2 run motor_controller azd3a_ethercat_check --dry-run
 Build:
 
 ```bash
-cd ~/kyutech/azd3a_ws
+cd ~/yuzu_ws
 colcon build --symlink-install
 source install/setup.bash
 ```
@@ -388,11 +384,12 @@ source install/setup.bash
 | `ethercat_generic_plugins` not found | wrong package name | use `ethercat_generic_slave` and `ethercat_generic_cia402_drive` |
 | Works until kernel upgrade | modules built for old kernel | rebuild IgH modules for new `uname -r` |
 
-## 13. Windows Development Workflow
+## 13. Source Review and Platform-Specific Validation
 
-Windows Codex can review and edit the main repository normally. It should read:
+Source, configuration, and documentation can be reviewed on any development
+platform. Reviewers should begin with:
 
-1. `progress.md`
+1. `README.md`
 2. this guide
 3. `motion_cmd/AZD3A_ETHERCAT_DRIVER_TEST.md`
 4. `motion_cmd/config/azd3a_ked_cia402_slave.yaml`
@@ -404,10 +401,10 @@ build environment containing an external dependency and generated artifacts.
 When Ubuntu-specific code is added, keep its source in the main repository and
 expose it to `azd3a_ws/src` with the existing symlink.
 
-Windows cannot validate the IgH kernel modules, `/dev/EtherCAT0`, NIC ownership,
-real-time behavior, or physical drive state. Those tests must remain on native
-Ubuntu hardware. Windows review is suitable for Python, YAML, documentation,
-unit tests, ROS configuration structure, and Git operations.
+EtherCAT kernel modules, `/dev/EtherCAT0`, NIC ownership, real-time behavior,
+and physical drive state must be validated on the target Ubuntu host. Source
+review, Python tests, YAML, documentation, and ROS configuration inspection
+can be performed separately from the hardware.
 
 Do not commit `build`, `install`, or `log` from any colcon workspace.
 

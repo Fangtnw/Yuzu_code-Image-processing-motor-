@@ -151,40 +151,54 @@ As of 2026-09-28, Motor 6 is integrated with Motor 4 through one composite
 slave-1 configuration. Local Axis 1 remains Motor 4 CSP position and local
 Axis 3 is Motor 6 CSV velocity; this avoids two ROS hardware instances
 competing for AZD3A #2. The operator guard is capped at 48 output rpm with a
-200 rpm/s software ramp and 0.5-second watchdog. This corresponds to
-approximately 75.40 mm/s belt speed. The software ramp is scaled from the
-previous 250 rpm/s profile; the catalog does not state a maximum acceleration.
+96 rpm/s software ramp and 0.5-second watchdog. This corresponds to
+approximately 75.40 mm/s belt speed. The catalog does not state a maximum
+acceleration.
 
-### 80% hardware speed operating caps (2026-09-28)
+### 80% hardware speed operating caps and ramp times (updated 2026-10-01)
 
 The supervisor requested operating speed caps at 80% of each installed
 actuator or geared motor's published maximum:
 
 | Motor | Published maximum | 80% operating speed | Acceleration/deceleration setting |
 | --- | ---: | ---: | --- |
-| 1 | 600 mm/s | 480 mm/s | 160 mm/s² (80% of current 200 mm/s² guard ceiling) |
-| 2 | 416 rpm output | 332.8 rpm | 665.6 rpm/s software ramp, scaled from prior 500 rpm/s cap |
-| 3 | 40 mm/s | 32 mm/s | 160 mm/s² (80% of 0.2 m/s² actuator maximum) |
-| 4 | 40 mm/s | 32 mm/s | 160 mm/s² (80% of 0.2 m/s² actuator maximum) |
-| 5 | 150 rpm output | 120 rpm | 120 rpm/s software ramp, scaled from prior 20 rpm/s profile |
-| 6 | 60 rpm output | 48 rpm / 75.40 mm/s belt | 200 rpm/s software ramp, scaled from prior 250 rpm/s profile |
+| 1 | 600 mm/s | 480 mm/s | 480 mm/s² software ramp (1 s) |
+| 2 | 416 rpm output | 332.8 rpm | 665.6 rpm/s software ramp |
+| 3 | 40 mm/s | 32 mm/s | 64 mm/s² (below 200 mm/s² actuator maximum) |
+| 4 | 40 mm/s | 32 mm/s | 64 mm/s² (below 200 mm/s² actuator maximum) |
+| 5 | 150 rpm output | 120 rpm | 240 rpm/s software ramp |
+| 6 | 60 rpm output | 48 rpm / 75.40 mm/s belt | 96 rpm/s software ramp |
 
-The manufacturer's rotary product data lists permissible speed but no maximum
-acceleration for Motors 2, 5, and 6. Their acceleration/deceleration values
-are software profiles, not hardware ratings; each was scaled in the same ratio
-as its operating speed changed. Motor 1's product page lists maximum speed and
-stroke but no maximum acceleration, so its 160 mm/s² setting is 80% of the
-existing software guard ceiling. These catalog limits do not establish the
-load-dependent safe speed of the assembled peeling mechanism.
+Motor 1 uses `480 mm/s / 1 s = 480 mm/s²` to soften its ramp after the operator
+reported abrupt motion. Motors 2–6 use `80% speed / 0.5 s` profiles. The
+specified ramps reach or stop from their caps within those times on sufficiently
+long moves. The DR28 actuator's 64 mm/s² setting is below its published
+200 mm/s² acceleration maximum. Manufacturer product data does not state
+maximum acceleration for Motors 1, 2, 5, or 6; these ramp values are software
+settings, not hardware ratings. Motor 1's 480 mm/s² profile must be validated
+gradually on the loaded vertical assembly. At the 480 mm/s² ramp, a rest-to-rest
+Motor 1 move needs about 480 mm to accelerate to 480 mm/s and brake; it cannot
+reach that cap and stop within the guarded 400 mm stroke. These catalog values
+also do not certify simultaneous operation of Motors 2–5 under the combined
+machine load. See
+`vendor/oriental_motor/MOTOR_SPEED_SOURCES.md` for model-specific source links,
+the ramp calculations, and operating caveats.
+
+The full-speed ramp requires travel before braking. For a rest-to-rest move,
+some short target distances cannot attain the velocity cap at all. In
+particular, a 30 mm Motor 6 step is shorter than the acceleration-plus-braking
+distance needed to reach 48 rpm with the 96 rpm/s ramp; Motor 1, Motors 3/4,
+and Motor 5 also require sufficiently long targets. This is normal trajectory
+planning, not a failure to apply the configured speed limit.
 
 ### Updated linear-axis motion requirements (2026-09-22; 80% speed caps 2026-09-28)
 
 - Motor 1 GUI and guard speed is 480 mm/s, 80% of the actuator's 600 mm/s
-  catalog maximum, with a 160 mm/s² software ramp. The operator previously
+  catalog maximum, with a 480 mm/s² software ramp (1 s to the speed cap). The operator previously
   reported physical operation at 100 mm/s; 480 mm/s requires staged physical
   validation. The GUI range is 0..400 mm, while the assembly has a provisional
   lower-end zero that must be physically confirmed before full-stroke motion.
-- Motors 3 and 4 are set to 32 mm/s and 160 mm/s², each 80% of the DR28's
+- Motors 3 and 4 are set to 32 mm/s and 64 mm/s², each 80% of the DR28's
   40 mm/s and 0.2 m/s² maximums. Project position guards remain 0..20 mm.
   Motor 3 is slave 0
   Axis 3 and Motor 4 is slave 1 Axis 1. Motor 3's scaling, direction, alarm-free
