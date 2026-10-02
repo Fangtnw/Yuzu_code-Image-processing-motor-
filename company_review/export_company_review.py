@@ -7,6 +7,8 @@ from datetime import datetime
 import shutil
 import re
 import hashlib
+import subprocess
+import sys
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -97,6 +99,11 @@ def main() -> None:
         copy_source_tree(source, output_root / relative_path)
 
     validate_export(output_root)
+    subprocess.run(
+        [sys.executable, "-B", "-m", "unittest", "discover",
+         "-s", "tests", "-p", "test_*.py"],
+        cwd=output_root, check=True,
+    )
     checksums = []
     for path in sorted(output_root.rglob("*")):
         if path.is_file():

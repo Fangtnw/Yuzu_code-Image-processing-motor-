@@ -8,6 +8,25 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class DeploymentTests(unittest.TestCase):
+    def test_readme_archive_installation_contract(self):
+        readme = (ROOT / "README.md").read_text()
+        self.assertNotRegex(readme.lower(), r"clone\s+(this|the)\s+(repo|repository)")
+        for instruction in (
+            "Extract the supplied ZIP",
+            "Keep this folder in place",
+            "Internet access is required",
+            "bash scripts/setup_workspace.sh",
+            "bash scripts/start_yuzu_peeler.sh",
+            "sudo /etc/init.d/ethercat start",
+            "--packages-up-to motor_controller",
+        ):
+            self.assertIn(instruction, readme)
+        for relative in ("scripts/setup_workspace.sh", "scripts/start_yuzu_peeler.sh",
+                         "UBUNTU_ETHERCAT_SETUP_GUIDE.md",
+                         "motion_cmd/YUZU_OPERATOR_GUI.md",
+                         "motion_cmd/launch/yuzu_peeler.launch.py", "patches/README.md"):
+            self.assertTrue((ROOT / relative).is_file(), relative)
+
     def test_shell_syntax_and_permissions(self):
         for name in ("setup_workspace.sh", "start_yuzu_peeler.sh", "prepare_driver.sh"):
             path = ROOT / "scripts" / name

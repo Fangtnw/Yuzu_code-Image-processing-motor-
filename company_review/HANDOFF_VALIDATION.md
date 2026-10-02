@@ -1,8 +1,8 @@
 # Handoff validation — 2026-10-02
 
 Approved technical snapshot for source review:
-`export/YuzuPeeler-MotorControl-review-20261002-v2`.
-Archive: `YuzuPeeler-MotorControl-review-20261002.tar.gz`.
+`export/YuzuPeeler-MotorControl-20261002-v3`.
+Archive: `YuzuPeeler-MotorControl-20261002-v3.zip`.
 Do not send the entire export directory; older snapshots were retained.
 
 ## Repairs
@@ -22,7 +22,11 @@ Do not send the entire export directory; older snapshots were retained.
 
 ## Checks completed
 
-- 29 offline tests passed in both source and exported trees.
+- 30 offline tests passed in the exported tree and a fresh ZIP extraction.
+- README is ZIP-first, distinguishes application source from downloaded external
+  dependencies, explains the permanent source folder, and separates first-time
+  setup, daily startup, and rebuilds. The exporter runs regression tests before
+  declaring success, including the README installation contract.
 - Shell syntax and executable permissions checked.
 - Driver patch applies to a clean local clone of the pinned commit; a second
   application is a no-op.
