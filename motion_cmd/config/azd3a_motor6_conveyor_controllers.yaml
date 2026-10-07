@@ -5,10 +5,11 @@ controller_manager:
     joint_state_broadcaster:
       type: joint_state_broadcaster/JointStateBroadcaster
 
-    motor6_raw_velocity_controller:
-      type: velocity_controllers/JointGroupVelocityController
+    motor6_raw_position_controller:
+      type: forward_command_controller/ForwardCommandController
 
-motor6_raw_velocity_controller:
+motor6_raw_position_controller:
   ros__parameters:
     joints:
       - motor6_joint
+    interface_name: position

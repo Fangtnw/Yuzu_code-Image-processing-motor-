@@ -30,10 +30,12 @@ is not an independent safety interlock or a substitute for a hardware stop.
   32 mm/s velocity and symmetric 64 mm/s^2 ramps, reaching the cap in 0.5 s.
   The acceleration is below the DR28's published 200 mm/s² maximum. Motor 3 uses
   the custom `motor3_position` interface on slave 0 Axis 3.
-- Motor 6 is limited to 48 rpm (75.4 mm/s belt speed), 80% of its 60 rpm
+- Motor 6 indexes 140.825 mm per step and is limited to 48 rpm (75.4 mm/s belt speed), 80% of its 60 rpm
   output maximum. The GUI defaults to that speed and a 96 rpm/s software ramp,
   reaching cap in 0.5 s; acc/dec entries are constrained to satisfy that time.
-  The 0.5-second watchdog remains. Positive RPM
+  The 0.5-second watchdog remains, refreshed by index heartbeats during a
+  step or speed commands during manual running. Backend indexing requires
+  position, velocity and enabled status together, no older than 0.1 s. Positive RPM
   is the physically verified forward conveyor direction.
 - Motor 5 uses a project limit of +/-180 degrees from an operator-defined runtime
   origin at 120 rpm, 80% of its 150 rpm output maximum. Its 240 rpm/s ramp is a
@@ -44,14 +46,14 @@ is not an independent safety interlock or a substitute for a hardware stop.
   **Set current position as zero** before using typed angle or return commands.
 - The combined launch owns each AZD3A slave once and operates Motors 1, 2, and
   3 through separate guarded interfaces on slave 0. Slave 1 similarly combines
-  Motor 4 Axis 1 position and Motor 6 Axis 3 velocity interfaces.
+  Motor 4 Axis 1 position and Motor 6 Axis 3 cyclic synchronous position interfaces.
 Commands may be issued step by step or concurrently when the machine sequence
 eventually requires it.
 
 The 0.5 s acceleration/deceleration time is the ramp to/from a requested speed,
 not a guarantee that every positioning move reaches that speed. Short moves
-must decelerate early; for example, the default 30 mm Motor 6 step cannot reach
-the 48 rpm cap and then stop with its 96 rpm/s ramp. Motors 2–5 are intended to
+must decelerate early. Motor 6's 140.825 mm step has sufficient distance to
+reach the 48 rpm cap and brake with its 96 rpm/s ramp. Motors 2–5 are intended to
 run simultaneously in part of the sequence; staged combined-load validation
 is required before using all their caps together. Exact official catalog
 sources and calculations are in `vendor/oriental_motor/MOTOR_SPEED_SOURCES.md`.
@@ -82,8 +84,8 @@ refreshing that speed command and sends repeated zero-speed commands. The
 controlled stop buttons remain available while their command backend is
   connected. Linear depth panels include 0..20 mm position bars; Motor 5 includes
 a runtime-zero-relative ±180° bar. The GUI reports command transmission and
-live feedback, but the current ROS status topics do not report target-reached
-or motion-complete events.
+live feedback. Motor 6 also reports backend indexing, interrupted, and
+settled-completion states; the other motors do not report motion-complete events.
 Select **Show hardware & motion details** below the motor panels to view each configured
 range, velocity, acceleration, and deceleration. These values are read-only in
 the GUI and mirror the guarded backend settings.
@@ -95,11 +97,16 @@ default to 665.6 rpm/s and remain operator-adjustable within the guard. These
 are software profiles, not manufacturer acceleration ratings. While rotation is active, the GUI
 refreshes the command so the existing 0.5-second watchdog does
 not stop it. Motor 3 and Motor 4 entries are absolute millimetres from their ABZO
-coordinate. Motor 6 entries and feedback are belt speed in mm/s (30 mm default
-distance step); the GUI also
-supports relative distance steps using encoder position feedback, converts
-commands to gearbox-output rpm internally, and keeps rpm out of the
-operator display. The prominent rotary stop sends repeated controlled
+coordinate. Motor 6 entries and feedback are belt speed in mm/s, with a
+read-only 140.825 mm index step. The first step captures the stopped position
+as the grid reference; subsequent targets use the index number and that same
+reference, without accumulating previous stop errors. The backend generates
+an absolute CSP position trajectory internally. Continuous Motor 6 manual
+speed is disabled; use the **CSP jog (mm)** buttons for realignment, then
+reset the reference at the visible fixture mark. **Resume interrupted step** returns to the retained target
+after a stop; it does not add another step. **Reset step reference here**
+deliberately replaces the grid at a stopped position. A backend
+restart also requires a new grid. The prominent rotary stop sends repeated controlled
 zero-speed commands to Motors 2 and 6. Closing the GUI publishes repeated Motor 2 and
 Motor 6 zero commands; position axes remain holding their last guarded targets
 until the backend shuts down.
@@ -109,6 +116,9 @@ the peeling sequence: Motor 6 positioning, Motor 1 approach, Motor 5 peeler
 positioning, rotation/feed, Motor 2 stop after step 4.3, gripping, Motor 1 home,
 release, and cycle wait.
 Motor 1/3/4 operation distances and Motor 2 speed are editable before running.
+Motor 6's distance is read-only and comes from the backend. Placement cannot
+advance until the requested conveyor index reports stopped completion. No
+fixture-mark confirmation or sensor workflow is included in this version.
 The default Motor 1 operation approach/home positions are 300 mm and 400 mm;
 the complete step list remains visible with only the active step highlighted.
 The GUI unlocks motion only after all six mapped CiA-402 status words report
@@ -119,6 +129,22 @@ Motor 5 zero capture requires fresh feedback and an operator confirmation that
 the mechanism is stationary and at the intended reference pose. Since the
 available interface does not expose an independent drive-stopped signal, the
 operator remains responsible for confirming that condition.
+
+### Motor 6 accuracy and commissioning
+
+The distance loop runs in the guard at 200 Hz, independently of the GUI's
+100 ms display refresh. It retains the absolute target while braking and
+approaching, and declares completion only after the error is within 0.02 mm
+of encoder-derived travel and measured motion has settled. Status shows the
+remaining signed encoder error. Heartbeat/feedback loss, a missed control
+deadline or a movement timeout interrupts the step instead of reporting success.
+
+The requested 140.825 mm is a rounded, drawing-derived nominal value for
+12 fixtures. It has not been physically calibrated. Count scaling, belt slip,
+stretch, gearbox backlash and fixture placement can affect actual belt travel;
+the software settling threshold is not a conveyor accuracy guarantee. Check
+marked-belt travel and repeated full circuits on the real machine before using
+the fixture load. See `MOTOR6_INDEXING.md` for validation and calibration notes.
 
 ## Motor 4 troubleshooting record
 

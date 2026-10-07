@@ -66,7 +66,7 @@ def generate_launch_description() -> LaunchDescription:
         Node(
             package="controller_manager",
             executable="spawner",
-            arguments=["motor6_raw_velocity_controller", "-c", "/controller_manager"],
+            arguments=["motor6_raw_position_controller", "-c", "/controller_manager"],
             output="screen",
         ),
         Node(
@@ -111,7 +111,7 @@ def generate_launch_description() -> LaunchDescription:
             package="motor_controller",
             executable="azd3a_motor6_conveyor_guard",
             parameters=[{
-                "max_rpm": 48.0,
+                "max_rpm": 40.34914050217066,
                 "max_acceleration_rpm_s": 96.0,
                 "command_timeout_s": 0.5,
             }],

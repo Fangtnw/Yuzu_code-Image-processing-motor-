@@ -1,7 +1,7 @@
 # Combined AZD3A #2 (slave 1) configuration:
 # - local Axis 1 / Motor 4 in CSP
 # - local Axis 2 / Motor 5 indexing in CSP
-# - local Axis 3 / Motor 6 conveyor in CSV
+# - local Axis 3 / Motor 6 conveyor in CSP
 vendor_id: 0x000002BE
 product_id: 0x000013AF
 assign_activate: 0x0300
@@ -13,11 +13,11 @@ rpdo:
       - {index: 0x6040, sub_index: 0, type: uint16, default: 0}
       - {index: 0x607a, sub_index: 0, type: int32, command_interface: position, factor: 10000000.0, default: .nan}
       - {index: 0x6060, sub_index: 0, type: int8, default: 8}
-  - index: 0x1622
+  - index: 0x1620
     channels:
       - {index: 0x7040, sub_index: 0, type: uint16, default: 0}
-      - {index: 0x70ff, sub_index: 0, type: int32, command_interface: velocity, factor: 79577.47154594767, default: 0}
-      - {index: 0x7060, sub_index: 0, type: int8, default: 9}
+      - {index: 0x707a, sub_index: 0, type: int32, command_interface: motor6_position, factor: 79577.47154594767, default: .nan}
+      - {index: 0x7060, sub_index: 0, type: int8, default: 8}
   - index: 0x1610
     channels:
       - {index: 0x6840, sub_index: 0, type: uint16, default: 0}

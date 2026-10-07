@@ -1,6 +1,6 @@
 # EtherCAT Bring-up Progress
 
-Last updated: 2026-10-01
+Last updated: 2026-10-07
 
 ## Goal
 
@@ -1302,3 +1302,29 @@ to 100 mm/s and 100 mm/s² at the operator's request. The current speed and
 ramp remain below the catalog and guard limits. The operator then reported
 that Motor 1 works at 100 mm/s. The GUI card now displays both speed and
 acceleration/deceleration values directly.
+
+
+## 2026-10-07 — Motor 6 fixed-reference 140.825 mm indexing
+
+The operator confirmed 12 planned fixtures and narrowed the current scope to
+140.825 mm per step at the existing 48 rpm (80%) speed cap. No fixture sensor
+is installed; sensor-based registration and manual mark-confirmation workflows
+are outside this change.
+
+An offline reproduction of the former GUI braking loop gave 140.9947..148.1575 mm
+for a 140.8 mm target as the 100 ms polling phase changed. The new pure motion
+model and 200 Hz backend retain absolute targets through braking, approach and
+settling, with a 0.02 mm encoder-error threshold. Targets share the first
+stopped reference and are rounded individually, preventing software endpoint
+and count-rounding errors from accumulating. The GUI sends index requests and
+heartbeats, reports measured error/completion, and offers explicit resume after
+an interruption. Placement waits for the requested conveyor index to complete.
+
+All 52 tests pass, including 120-step accumulated-error simulation, delayed
+feedback/drive response, reversal, encoder rollover, watchdog/fault/stall
+handling, duplicate requests and commands arriving after Stop. Combined and
+standalone xacro expansion, Python compilation and an isolated package build
+passed. No live motion, live restart or live-workspace rebuild was performed.
+Physical 140.825 mm travel and the new approach behavior remain to be measured.
+See `motion_cmd/MOTOR6_INDEXING.md` for the specification distinction, protocol,
+validation assumptions and remaining physical checks.

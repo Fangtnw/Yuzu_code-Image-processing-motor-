@@ -1,8 +1,8 @@
 diff --git a/ethercat_generic_plugins/ethercat_generic_cia402_drive/include/ethercat_generic_plugins/generic_ec_cia402_drive.hpp b/ethercat_generic_plugins/ethercat_generic_cia402_drive/include/ethercat_generic_plugins/generic_ec_cia402_drive.hpp
-index 3a79c9e..62195b6 100644
+index 3a79c9e..fc31e7b 100644
 --- a/ethercat_generic_plugins/ethercat_generic_cia402_drive/include/ethercat_generic_plugins/generic_ec_cia402_drive.hpp
 +++ b/ethercat_generic_plugins/ethercat_generic_cia402_drive/include/ethercat_generic_plugins/generic_ec_cia402_drive.hpp
-@@ -66,6 +66,34 @@ protected:
+@@ -66,6 +66,36 @@ protected:
    int fault_reset_command_interface_index_ = -1;
    bool last_fault_reset_command_ = false;
    double last_position_ = std::numeric_limits<double>::quiet_NaN();
@@ -19,6 +19,8 @@ index 3a79c9e..62195b6 100644
 +  uint16_t secondary_status_word_ = 0;
 +  DeviceState secondary_last_state_ = STATE_START;
 +  DeviceState secondary_state_ = STATE_START;
++  double secondary_last_position_ = std::numeric_limits<double>::quiet_NaN();
++  bool secondary_position_synchronized_ = false;
 +  /** Optional third CiA 402 axis contained in the same physical slave. */
 +  bool tertiary_axis_enabled_ = false;
 +  uint16_t tertiary_cia402_object_index_offset_ = 0;
@@ -38,7 +40,7 @@ index 3a79c9e..62195b6 100644
    /** returns device state based upon the status_word */
    DeviceState deviceState(uint16_t status_word);
 diff --git a/ethercat_generic_plugins/ethercat_generic_cia402_drive/src/generic_ec_cia402_drive.cpp b/ethercat_generic_plugins/ethercat_generic_cia402_drive/src/generic_ec_cia402_drive.cpp
-index 67dd2c1..dc77a1b 100644
+index 67dd2c1..7157430 100644
 --- a/ethercat_generic_plugins/ethercat_generic_cia402_drive/src/generic_ec_cia402_drive.cpp
 +++ b/ethercat_generic_plugins/ethercat_generic_cia402_drive/src/generic_ec_cia402_drive.cpp
 @@ -38,6 +38,24 @@ void EcCiA402Drive::updateState()
@@ -90,7 +92,7 @@ index 67dd2c1..dc77a1b 100644
      if (is_operational_) {
        if (fault_reset_command_interface_index_ >= 0) {
          if (command_interface_ptr_->at(fault_reset_command_interface_index_) == 0) {
-@@ -72,39 +104,99 @@ void EcCiA402Drive::processData(size_t entry_idx, uint8_t * domain_address)
+@@ -72,39 +104,128 @@ void EcCiA402Drive::processData(size_t entry_idx, uint8_t * domain_address)
        }
      }
    }
@@ -99,6 +101,11 @@ index 67dd2c1..dc77a1b 100644
 +  {
 +    channel.default_value = transition(
 +      secondary_state_, channel.ec_read(domain_address));
++    if (secondary_mode_of_operation_ == ModeOfOperation::MODE_CYCLIC_SYNC_POSITION &&
++      !std::isfinite(secondary_last_position_))
++    {
++      channel.default_value = 0;  // No enable until position feedback is available.
++    }
 +  }
 +  if (is_tertiary_cia402_object(CiA402D_RPDO_CONTROLWORD) && is_operational_ &&
 +    auto_state_transitions_)
@@ -130,6 +137,24 @@ index 67dd2c1..dc77a1b 100644
 +    }
 +    channel.override_command = !is_csp ||
 +      (std::isfinite(position_startup_tolerance_) && !position_command_synchronized_);
++  }
++  if (is_secondary_cia402_object(CiA402D_RPDO_POSITION)) {
++    const bool is_csp = secondary_mode_of_operation_display_ ==
++      ModeOfOperation::MODE_CYCLIC_SYNC_POSITION;
++    if (std::isfinite(secondary_last_position_)) {
++      channel.default_value = channel.factor * secondary_last_position_ + channel.offset;
++      if (is_csp && !secondary_position_synchronized_ &&
++        channel.is_command_interface_defined())
++      {
++        const double command = command_interface_ptr_->at(channel.command_interface_index(0));
++        if (std::isfinite(command) &&
++          std::abs(command - secondary_last_position_) <= 0.000025132741228718346)
++        {
++          secondary_position_synchronized_ = true;
++        }
++      }
++    }
++    channel.override_command = !is_csp || !secondary_position_synchronized_;
 +  }
 +  if (is_tertiary_cia402_object(CiA402D_RPDO_POSITION)) {
 +    if (tertiary_mode_of_operation_display_ != ModeOfOperation::MODE_NO_MODE &&
@@ -178,6 +203,12 @@ index 67dd2c1..dc77a1b 100644
 +  if (is_cia402_object(CiA402D_TPDO_POSITION)) {
      last_position_ = channel.last_value;
    }
++  if (is_secondary_cia402_object(CiA402D_TPDO_POSITION)) {
++    secondary_last_position_ = channel.last_value;
++    if ((secondary_status_word_ & 0x006f) != 0x0027) {
++      secondary_position_synchronized_ = false;
++    }
++  }
 +  if (is_tertiary_cia402_object(CiA402D_TPDO_POSITION)) {
 +    tertiary_last_position_ = channel.last_value;
 +  }
@@ -196,7 +227,7 @@ index 67dd2c1..dc77a1b 100644
  
  
    // CHECK FOR STATE CHANGE
-@@ -122,6 +214,46 @@ bool EcCiA402Drive::setupSlave(
+@@ -122,6 +243,46 @@ bool EcCiA402Drive::setupSlave(
    command_interface_ptr_ = command_interface;
    parameters_ = slave_parameters;
  
@@ -243,7 +274,7 @@ index 67dd2c1..dc77a1b 100644
    if (parameters_.find("slave_config") != parameters_.end()) {
      if (!setup_from_config_file(parameters_["slave_config"])) {
        return false;
-@@ -137,6 +269,12 @@ bool EcCiA402Drive::setupSlave(
+@@ -137,6 +298,12 @@ bool EcCiA402Drive::setupSlave(
    if (parameters_.find("mode_of_operation") != parameters_.end()) {
      mode_of_operation_ = std::stod(parameters_["mode_of_operation"]);
    }

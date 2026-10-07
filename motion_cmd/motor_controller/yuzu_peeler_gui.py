@@ -1,6 +1,9 @@
 """Operator GUI for guarded manual control and peeling-sequence operation."""
 
+import json
 import math
+import time
+import uuid
 import tkinter as tk
 from tkinter import messagebox, ttk
 
@@ -8,7 +11,9 @@ import rclpy
 from control_msgs.msg import DynamicJointState
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
-from std_msgs.msg import Empty, Float64, Float64MultiArray
+from std_msgs.msg import Empty, Float64, Float64MultiArray, String
+
+from motor_controller.conveyor_index import NOMINAL_PITCH_MM, TRANSMISSION_RATIO, TRAVEL_CALIBRATION, OPERATING_MAX_RPM, OPERATING_SPEED_MM_S
 
 
 MOTOR1_TOPIC = "/motor1_position_controller/commands"
@@ -19,6 +24,9 @@ MOTOR5_TOPIC = "/motor5_position_controller/commands_deg"
 MOTOR5_SET_ZERO_TOPIC = "/motor5_position_controller/set_zero"
 MOTOR5_MANUAL_STEP_TOPIC = "/motor5_position_controller/manual_step_deg"
 MOTOR6_TOPIC = "/motor6_conveyor/commands_rpm"
+MOTOR6_INDEX_TOPIC = "/motor6_conveyor/index_request"
+MOTOR6_HEARTBEAT_TOPIC = "/motor6_conveyor/index_heartbeat"
+MOTOR6_STATUS_TOPIC = "/motor6_conveyor/index_status"
 AXIS1_MIN_MM = 0.0
 AXIS1_MAX_MM = 400.0
 AXIS1_INCREMENT_MM = 0.0012
@@ -40,11 +48,10 @@ MOTOR5_MAX_ANGLE_DEG = 180.0
 MOTOR5_HARDWARE_STEP_DEG = 0.0018
 MOTOR5_VELOCITY_RPM = 120.0  # 80% of the FC20 output rating, 150 rpm
 MOTOR5_ACCELERATION_RPM_S = 240.0  # reaches 120 rpm in 0.5 s; software ramp, no catalog max
-MOTOR6_GUI_MAX_RPM = 48.0  # 80% of the PS50 output rating, 60 rpm
+MOTOR6_GUI_MAX_RPM = OPERATING_MAX_RPM
 MOTOR6_ACCELERATION_RPM_S = 96.0  # reaches 48 rpm in 0.5 s; software ramp, no catalog max
 MOTOR6_PULLEY_DIAMETER_MM = 30.0
-MOTOR6_GUI_MAX_MM_S = MOTOR6_GUI_MAX_RPM * math.pi * MOTOR6_PULLEY_DIAMETER_MM / 60.0
-MOTOR6_STEP_MAX_MM = 1000.0
+MOTOR6_GUI_MAX_MM_S = OPERATING_SPEED_MM_S
 FEEDBACK_STALE_S = 2.0
 OPERATION_ENABLED_MASK = 0x006F
 OPERATION_ENABLED_VALUE = 0x0027
@@ -123,15 +130,7 @@ def checked_motor6_speed_mm_s(requested_mm_s: float) -> float:
         raise ValueError(
             f"Motor 6 belt speed must be 0..{MOTOR6_GUI_MAX_MM_S:.2f} mm/s"
         )
-    return requested_mm_s * 60.0 / (math.pi * MOTOR6_PULLEY_DIAMETER_MM)
-
-
-def checked_motor6_distance_mm(requested_mm: float) -> float:
-    if not math.isfinite(requested_mm) or not 0.0 < requested_mm <= MOTOR6_STEP_MAX_MM:
-        raise ValueError(
-            f"Motor 6 distance step must be within 0..{MOTOR6_STEP_MAX_MM:.0f} mm"
-        )
-    return requested_mm
+    return requested_mm_s * 60.0 / (math.pi * MOTOR6_PULLEY_DIAMETER_MM * TRANSMISSION_RATIO * TRAVEL_CALIBRATION)
 
 
 class YuzuOperatorNode(Node):
@@ -145,9 +144,14 @@ class YuzuOperatorNode(Node):
         self.motor5_zero_publisher = self.create_publisher(Empty, MOTOR5_SET_ZERO_TOPIC, 10)
         self.motor5_manual_step_publisher = self.create_publisher(Float64, MOTOR5_MANUAL_STEP_TOPIC, 10)
         self.motor6_publisher = self.create_publisher(Float64MultiArray, MOTOR6_TOPIC, 10)
-        self.create_subscription(JointState, "/joint_states", self._joint_state, 10)
+        self.motor6_index_publisher = self.create_publisher(String, MOTOR6_INDEX_TOPIC, 1)
+        self.motor6_heartbeat_publisher = self.create_publisher(String, MOTOR6_HEARTBEAT_TOPIC, 1)
+        self.motor6_index_status = {}
+        self.motor6_index_status_time = None
+        self.create_subscription(String, MOTOR6_STATUS_TOPIC, self._motor6_index_status, 1)
+        self.create_subscription(JointState, "/joint_states", self._joint_state, 1)
         self.create_subscription(
-            DynamicJointState, "/dynamic_joint_states", self._dynamic_joint_state, 10
+            DynamicJointState, "/dynamic_joint_states", self._dynamic_joint_state, 1
         )
         self.axis1_position_m = None
         self.axis2_velocity_rad_s = None
@@ -165,6 +169,28 @@ class YuzuOperatorNode(Node):
             "motor5": None,
             "motor6": None,
         }
+
+    def _motor6_index_status(self, message: String) -> None:
+        try:
+            status = json.loads(message.data)
+            if not isinstance(status, dict) or not all(
+                key in status for key in ("session", "state", "reference_id", "index", "stopped", "fresh", "pitch_mm")
+            ):
+                return
+        except (ValueError, TypeError):
+            return
+        self.motor6_index_status = status
+        self.motor6_index_status_time = time.monotonic()
+
+    def motor6_status_fresh(self) -> bool:
+        return (self.motor6_index_status_time is not None
+                and time.monotonic() - self.motor6_index_status_time <= 0.35)
+
+    def publish_motor6_index(self, request: dict) -> None:
+        self.motor6_index_publisher.publish(String(data=json.dumps(request, allow_nan=False)))
+
+    def publish_motor6_heartbeat(self, request_id: str) -> None:
+        self.motor6_heartbeat_publisher.publish(String(data=request_id))
 
     def _mark_feedback(self, motor: str) -> None:
         self.feedback_times[motor] = self.get_clock().now()
@@ -301,9 +327,10 @@ class YuzuOperatorGui:
         self.axis2_command_rpm = 0.0
         self.motor6_running = False
         self.motor6_command_rpm = 0.0
-        self.motor6_distance_active = False
-        self.motor6_distance_target_rad = None
-        self.motor6_distance_deceleration_mm_s2 = None
+        self.motor6_pending = None
+        self.motor6_lease = None
+        self.operation_conveyor_request = None
+        self.operation_conveyor_target = None
         self.motor5_origin_rad = None
 
         root.title("Yuzu Peeler — Motor Operator")
@@ -417,7 +444,7 @@ class YuzuOperatorGui:
         settings = ttk.LabelFrame(parent, text="Operator inputs", padding=10)
         settings.pack(fill="x", pady=(0, 10))
         fields = (
-            ("Step 1 · Motor 6 positioning distance (mm)", "30.0"),
+            ("Step 1 · Motor 6 positioning distance (mm)", f"{NOMINAL_PITCH_MM:.3f}"),
             ("Step 2 · Motor 1 approach position (mm)", "300.0"),
             ("Step 4.2 · Motor 3 feed-in position (mm)", "5.0"),
             ("Step 4.2 · Motor 4 feed-in position (mm)", "5.0"),
@@ -431,6 +458,8 @@ class YuzuOperatorGui:
             ttk.Label(settings, text=label).grid(row=row // 2, column=(row % 2) * 2, sticky="w", padx=4, pady=3)
             entry = ttk.Entry(settings, width=12)
             entry.insert(0, default)
+            if label.startswith("Step 1 · Motor 6"):
+                entry.configure(state="readonly")
             entry.grid(row=row // 2, column=(row % 2) * 2 + 1, sticky="e", padx=4, pady=3)
             self.operation_entries[label] = entry
         steps = (
@@ -487,15 +516,21 @@ class YuzuOperatorGui:
             self.operation_next_button.configure(state="normal")
 
     def operation_reset(self) -> None:
+        self.operation_conveyor_request = None
+        self.operation_conveyor_target = None
         self.operation_step_index = 0
         self._update_operation_step_text()
         self.status_text.set("Operation sequence reset; no motion command was sent.")
 
     def operation_next(self) -> None:
+        if self.motor6_pending or self.operation_conveyor_request or not self._operation_conveyor_ready():
+            self.status_text.set("Wait for Motor 6 to finish its indexed step before placement.")
+            return
         step = self.operation_step_index
         if step == 0:
-            self._set_entry_value(self.motor6_distance_entry, self._operation_value("Step 1 · Motor 6 positioning distance (mm)"))
-            self.step_motor6(1)
+            if self.step_motor6(1):
+                self.operation_conveyor_request = self.motor6_pending["id"]
+            return
         elif step == 1:
             self._set_entry_value(self.axis1_entry, self._operation_value("Step 2 · Motor 1 approach position (mm)"))
             self.move_axis1()
@@ -641,7 +676,7 @@ class YuzuOperatorGui:
         frame = ttk.LabelFrame(parent, text="Motor 6 — Conveyor", padding=12)
         frame.grid(row=1, column=2, sticky="nsew", padx=4, pady=4)
         ttk.Label(frame, text=f"Operating belt-speed cap: {MOTOR6_GUI_MAX_MM_S:.1f} mm/s ({MOTOR6_GUI_MAX_RPM:.0f} rpm)").pack(anchor="w")
-        ttk.Label(frame, text="Distance mode: relative conveyor steps using encoder position").pack(anchor="w")
+        ttk.Label(frame, text="Indexed steps from a fixed reference · first step captures start").pack(anchor="w")
         ttk.Label(frame, text="+ direction: verified forward · use controlled stop").pack(anchor="w")
         self.motor6_feedback = tk.StringVar(value="Feedback: —")
         ttk.Label(frame, textvariable=self.motor6_feedback, style="Status.TLabel").pack(
@@ -657,10 +692,10 @@ class YuzuOperatorGui:
         self.motor6_entry.pack(side="right")
         distance_row = ttk.Frame(frame)
         distance_row.pack(fill="x", pady=(4, 0))
-        ttk.Label(distance_row, text="Distance step (mm)").pack(side="left")
-        self.motor6_distance_entry = ttk.Entry(distance_row, width=12)
-        self.motor6_distance_entry.insert(0, "30.0")
-        self.motor6_distance_entry.pack(side="right")
+        self.motor6_pitch_text = tk.StringVar(value=f"{NOMINAL_PITCH_MM:.3f} mm per step")
+        ttk.Label(distance_row, textvariable=self.motor6_pitch_text).pack(side="left")
+        self.motor6_index_feedback = tk.StringVar(value="Waiting for conveyor index backend")
+        ttk.Label(frame, textvariable=self.motor6_index_feedback, wraplength=360).pack(fill="x", pady=4)
         profile = ttk.Frame(frame)
         profile.pack(fill="x", pady=(4, 0))
         ttk.Label(profile, text="Acc / dec (rpm/s)").pack(side="left")
@@ -680,6 +715,20 @@ class YuzuOperatorGui:
             )
             button.pack(side="right", padx=(2, 0) if direction > 0 else (0, 0))
             self.step_buttons[6].append(button)
+        self.motor6_resume = ttk.Button(frame, text="Resume interrupted step", command=self.resume_motor6)
+        self.motor6_resume.pack(fill="x", pady=4)
+        jog_row = ttk.Frame(frame)
+        jog_row.pack(fill="x", pady=(4, 0))
+        ttk.Label(jog_row, text="CSP jog (mm)").pack(side="left")
+        self.motor6_jog_entry = ttk.Entry(jog_row, width=10)
+        self.motor6_jog_entry.insert(0, "35.995")
+        self.motor6_jog_entry.pack(side="right")
+        jog_buttons = ttk.Frame(frame)
+        jog_buttons.pack(fill="x", pady=(2, 4))
+        ttk.Button(jog_buttons, text="Jog +", command=lambda: self.jog_motor6(1)).pack(side="left", expand=True, fill="x", padx=(0, 2))
+        ttk.Button(jog_buttons, text="Jog −", command=lambda: self.jog_motor6(-1)).pack(side="right", expand=True, fill="x", padx=(2, 0))
+        self.motor6_reference = ttk.Button(frame, text="Reset step reference here", command=self.reset_motor6_reference)
+        self.motor6_reference.pack(fill="x", pady=4)
         self.motor6_direction = tk.IntVar(value=1)
         directions = ttk.Frame(frame)
         directions.pack(fill="x", pady=(8, 4))
@@ -689,9 +738,7 @@ class YuzuOperatorGui:
         ttk.Radiobutton(
             directions, text="Reverse (−)", variable=self.motor6_direction, value=-1
         ).pack(side="right")
-        self.motor6_start = ttk.Button(
-            frame, text="Start conveyor", command=self.start_motor6
-        )
+        self.motor6_start = ttk.Button(frame, text="Manual run (disabled in CSP)", command=self.start_motor6)
         self.motor6_start.pack(fill="x", pady=(8, 6))
         self.motor6_stop = ttk.Button(
             frame, text="Stop conveyor", command=self.stop_motor6
@@ -1051,96 +1098,178 @@ class YuzuOperatorGui:
         self.status_text.set("Motor 5 return-to-origin command sent; monitor feedback for completion.")
 
     def start_motor6(self) -> None:
-        if self.node.motor6_publisher.get_subscription_count() == 0:
-            messagebox.showerror("Motor 6 unavailable", "Motor 6 guarded backend is not running.")
+        messagebox.showinfo(
+            "Motor 6 is position controlled",
+            "Use the 140 mm fixture index controls. Continuous manual speed is disabled in CSP mode.",
+        )
+        return
+        # Kept below for reference while commissioning older CSV hardware.
+        status = self.node.motor6_index_status
+        if (not self.node.motor6_status_fresh() or not status.get("fresh")
+                or self.motor6_pending or status.get("state") == "indexing"):
+            messagebox.showerror("Motor 6 unavailable", "Wait for fresh feedback and finish or stop the index first.")
             return
         try:
             rpm = checked_motor6_speed_mm_s(float(self.motor6_entry.get()))
             acceleration, deceleration = checked_rotary_ramp(
-                float(self.motor6_accel_entry.get()),
-                float(self.motor6_decel_entry.get()),
-                MOTOR6_ACCELERATION_RPM_S,
-                rpm,
+                float(self.motor6_accel_entry.get()), float(self.motor6_decel_entry.get()),
+                MOTOR6_ACCELERATION_RPM_S, rpm,
             )
         except ValueError as error:
             messagebox.showerror("Invalid Motor 6 command", str(error))
             return
+        self.motor6_lease = None
+        self.operation_conveyor_target = None
         self.motor6_command_rpm = rpm * self.motor6_direction.get()
         self.motor6_running = rpm > 0.0
-        self.motor6_distance_active = False
-        self.motor6_distance_target_rad = None
-        self.motor6_distance_deceleration_mm_s2 = None
         self.node.publish_motor6_profile(self.motor6_command_rpm, acceleration, deceleration)
-        belt_speed_mm_s = (
-            abs(self.motor6_command_rpm) * math.pi * MOTOR6_PULLEY_DIAMETER_MM / 60.0
-        )
-        self.status_text.set(
-            f"Motor 6 conveyor command sent: {belt_speed_mm_s:.2f} mm/s · "
-            f"acc {acceleration:.1f} / dec {deceleration:.1f} rpm/s"
-        )
+        self.status_text.set("Motor 6 manual conveyor command sent; a new step grid starts after manual motion.")
 
     def stop_motor6(self) -> None:
         self.motor6_running = False
         self.motor6_command_rpm = 0.0
-        self.motor6_distance_active = False
-        self.motor6_distance_target_rad = None
-        self.motor6_distance_deceleration_mm_s2 = None
+        self.motor6_pending = None
+        self.motor6_lease = None
+        self.operation_conveyor_request = None
         self.node.publish_motor6(0.0)
-        self.status_text.set("Motor 6 stop requested; guarded deceleration is active.")
+        self.status_text.set("Motor 6 stop requested; interrupted index is retained for Resume.")
 
-    def step_motor6(self, direction: int) -> None:
-        if self.node.motor6_publisher.get_subscription_count() == 0:
-            messagebox.showerror("Motor 6 unavailable", "Motor 6 guarded backend is not running.")
-            return
-        if self.node.motor6_position_rad is None or not self.node.feedback_is_fresh_for("motor6"):
-            messagebox.showerror(
-                "Motor 6 feedback unavailable",
-                "Wait for fresh conveyor position feedback before stepping.",
-            )
-            return
+    def _request_motor6_index(self, operation: str, **values) -> bool:
+        if (self.motor6_pending or not self.node.motor6_status_fresh()
+                or self.node.motor6_index_publisher.get_subscription_count() == 0):
+            messagebox.showerror("Motor 6 unavailable", "Wait for the index backend and current request to finish.")
+            return False
+        status = self.node.motor6_index_status
+        request = dict(id=uuid.uuid4().hex, session=status["session"],
+                       reference_id=status["reference_id"], op=operation,
+                       sent_ns=self.node.get_clock().now().nanoseconds, **values)
+        self.motor6_pending = dict(request, sent=time.monotonic())
+        self.motor6_lease = request["id"] if operation in ("index", "resume", "jog") else None
+        self.node.publish_motor6_index(request)
+        self.status_text.set("Motor 6 index request sent; waiting for backend acceptance.")
+        return True
+
+    def step_motor6(self, direction: int) -> bool:
+        status = self.node.motor6_index_status
+        if (self.motor6_running or not status.get("stopped")
+                or status.get("state") not in ("ready", "unreferenced")):
+            messagebox.showerror("Motor 6 not ready", "Wait until stopped; use Resume for an interrupted step.")
+            return False
         try:
-            distance_mm = checked_motor6_distance_mm(float(self.motor6_distance_entry.get()))
             speed_rpm = checked_motor6_speed_mm_s(float(self.motor6_entry.get()))
+            if speed_rpm <= 0.0:
+                raise ValueError("Step speed must be greater than zero")
             acceleration, deceleration = checked_rotary_ramp(
-                float(self.motor6_accel_entry.get()),
-                float(self.motor6_decel_entry.get()),
-                MOTOR6_ACCELERATION_RPM_S,
-                speed_rpm,
+                float(self.motor6_accel_entry.get()), float(self.motor6_decel_entry.get()),
+                MOTOR6_ACCELERATION_RPM_S, speed_rpm,
             )
         except ValueError as error:
             messagebox.showerror("Invalid Motor 6 step", str(error))
+            return False
+        index = status["index"] if status.get("referenced") else 0
+        return self._request_motor6_index("index", index=index + direction, rpm=speed_rpm,
+                                         acceleration=acceleration, deceleration=deceleration)
+
+    def resume_motor6(self) -> None:
+        self._request_motor6_index("resume")
+
+    def jog_motor6(self, direction: int) -> None:
+        status = self.node.motor6_index_status
+        if (self.motor6_running or not status.get("stopped")
+                or status.get("state") not in ("ready", "unreferenced")):
+            messagebox.showerror("Motor 6 not ready", "Jog requires fresh, stopped conveyor feedback.")
             return
-        self.motor6_distance_target_rad = (
-            self.node.motor6_position_rad
-            + direction * distance_mm / (MOTOR6_PULLEY_DIAMETER_MM / 2.0)
+        try:
+            distance = abs(float(self.motor6_jog_entry.get()))
+            speed = checked_motor6_speed_mm_s(float(self.motor6_entry.get()))
+            acceleration, deceleration = checked_rotary_ramp(
+                float(self.motor6_accel_entry.get()), float(self.motor6_decel_entry.get()),
+                MOTOR6_ACCELERATION_RPM_S, speed,
+            )
+            if distance <= 0.0:
+                raise ValueError("Jog distance must be greater than zero")
+        except ValueError as error:
+            messagebox.showerror("Invalid Motor 6 jog", str(error))
+            return
+        self._request_motor6_index(
+            "jog", distance_mm=direction * distance, rpm=speed,
+            acceleration=acceleration, deceleration=deceleration,
         )
-        self.motor6_command_rpm = direction * speed_rpm
-        self.motor6_running = True
-        self.motor6_distance_active = True
-        self.motor6_distance_deceleration_mm_s2 = (
-            deceleration * math.pi * MOTOR6_PULLEY_DIAMETER_MM / 60.0
-        )
-        self.node.publish_motor6_profile(self.motor6_command_rpm, acceleration, deceleration)
-        self.status_text.set(
-            f"Motor 6 step started: {direction * distance_mm:+.2f} mm · "
-            "stopping at encoder target"
-        )
+
+    def reset_motor6_reference(self) -> None:
+        if messagebox.askyesno("Reset conveyor step reference",
+                               "Use this stopped position as a new step reference? This replaces the previous target grid."):
+            if self._request_motor6_index("reference"):
+                self.operation_conveyor_target = None
+
+    def _update_motor6_index(self) -> None:
+        status = self.node.motor6_index_status
+        fresh = self.node.motor6_status_fresh()
+        pending = self.motor6_pending
+        if pending and fresh and status.get("request_id") == pending["id"]:
+            self.motor6_pending = None
+            accepted = status.get("request_ok") is True
+            self.status_text.set(status.get("request_message", "Conveyor request processed"))
+            if not accepted:
+                self.motor6_lease = None
+            if self.operation_conveyor_request == pending["id"]:
+                self.operation_conveyor_request = None
+                if accepted:
+                    self.operation_conveyor_target = (status["session"], status["reference_id"], status["target_index"])
+                    self.operation_step_index = 1
+                    self._update_operation_step_text()
+        elif pending and time.monotonic() - pending["sent"] > 1.0:
+            self.stop_motor6()
+            self.status_text.set("No conveyor acknowledgement; stop requested. Check backend status before retrying.")
+        if self.motor6_lease:
+            if not fresh:
+                self.stop_motor6()
+                self.status_text.set("Conveyor index status lost; controlled stop requested.")
+            elif self.motor6_pending or status.get("state") in ("indexing", "jogging"):
+                self.node.publish_motor6_heartbeat(self.motor6_lease)
+            else:
+                self.motor6_lease = None
+        if fresh:
+            error = status.get("error_mm")
+            error_text = "" if error is None else f" · Error {error:+.4f} mm"
+            self.motor6_index_feedback.set(status.get("message", "") + error_text)
+            pitch = float(status["pitch_mm"])
+            self.motor6_pitch_text.set(f"{pitch:.3f} mm per step")
+            entry = self.operation_entries["Step 1 · Motor 6 positioning distance (mm)"]
+            if entry.get() != f"{pitch:.3f}":
+                entry.configure(state="normal")
+                self._set_entry_value(entry, f"{pitch:.3f}")
+                entry.configure(state="readonly")
+        else:
+            self.motor6_index_feedback.set("Waiting for conveyor index backend")
+
+    def _operation_conveyor_ready(self) -> bool:
+        if self.operation_step_index != 1:
+            return True
+        status = self.node.motor6_index_status
+        return (self.node.motor6_status_fresh() and status.get("state") == "ready"
+                and status.get("stopped") and self.operation_conveyor_target ==
+                (status.get("session"), status.get("reference_id"), status.get("index")))
 
     def stop_rotary_motors(self) -> None:
         self.axis2_running = False
         self.axis2_command_rpm = 0.0
         self.motor6_running = False
         self.motor6_command_rpm = 0.0
-        self.motor6_distance_active = False
-        self.motor6_distance_target_rad = None
-        self.motor6_distance_deceleration_mm_s2 = None
+        self.motor6_lease = None
+        self.motor6_pending = None
+        self.operation_conveyor_request = None
         for _ in range(5):
             self.node.publish_axis2(0.0)
             self.node.publish_motor6(0.0)
         self.status_text.set("Motor 2 and Motor 6 guarded stops requested.")
 
     def tick(self) -> None:
-        rclpy.spin_once(self.node, timeout_sec=0.0)
+        # Drain available subscriptions without keeping old position samples in
+        # a GUI-rate queue. Motion itself runs in the independent 200 Hz guard.
+        for _ in range(8):
+            rclpy.spin_once(self.node, timeout_sec=0.0)
+        self._update_motor6_index()
         backend = {
             "motor1": self.node.motor1_publisher.get_subscription_count() > 0
             or self.node.feedback_times["motor1"] is not None,
@@ -1180,15 +1309,9 @@ class YuzuOperatorGui:
             for _ in range(5):
                 self.node.publish_axis2(0.0)
             self.status_text.set("Motor 2 feedback lost; repeated controlled stop commands sent.")
-        if self.motor6_running and not ready["motor6"]:
-            self.motor6_running = False
-            self.motor6_command_rpm = 0.0
-            self.motor6_distance_active = False
-            self.motor6_distance_target_rad = None
-            self.motor6_distance_deceleration_mm_s2 = None
-            for _ in range(5):
-                self.node.publish_motor6(0.0)
-            self.status_text.set("Motor 6 feedback lost; repeated controlled stop commands sent.")
+        if self.motor6_running and (not ready["motor6"] or not self.node.motor6_status_fresh()):
+            self.stop_motor6()
+            self.status_text.set("Motor 6 feedback lost; controlled stop requested.")
 
         axis1_ready = ready["motor1"]
         axis2_ready = ready["motor2"]
@@ -1208,7 +1331,13 @@ class YuzuOperatorGui:
         motor5_motion_ready = motor5_ready and self.motor5_origin_rad is not None
         self.motor5_move.configure(state="normal" if motor5_motion_ready else "disabled")
         self.motor5_home.configure(state="normal" if motor5_motion_ready else "disabled")
-        self.motor6_start.configure(state="normal" if motor6_ready else "disabled")
+        index_status = self.node.motor6_index_status
+        index_live = self.node.motor6_status_fresh() and index_status.get("fresh", False)
+        index_idle = index_live and index_status.get("stopped") and not self.motor6_pending
+        index_step_ready = index_idle and index_status.get("state") in ("ready", "unreferenced")
+        self.motor6_start.configure(state="normal" if motor6_ready and index_live and not self.motor6_pending and index_status.get("state") != "indexing" else "disabled")
+        self.motor6_resume.configure(state="normal" if index_idle and index_status.get("state") == "interrupted" else "disabled")
+        self.motor6_reference.configure(state="normal" if index_idle and index_status.get("state") not in ("indexing", "manual") else "disabled")
         self.motor6_stop.configure(state="normal" if backend["motor6"] else "disabled")
         for motor_id in (1, 3, 4):
             state = "normal" if ready[f"motor{motor_id}"] else "disabled"
@@ -1217,38 +1346,12 @@ class YuzuOperatorGui:
         for button in self.step_buttons[5]:
             button.configure(state="normal" if motor5_ready else "disabled")
         for button in self.step_buttons[6]:
-            button.configure(state="normal" if motor6_ready else "disabled")
+            button.configure(state="normal" if motor6_ready and index_step_ready and not self.motor6_running else "disabled")
 
         if self.axis2_running:
             self.node.publish_axis2(self.axis2_command_rpm)
         if self.motor6_running:
-            if self.motor6_distance_active and self.motor6_distance_target_rad is not None:
-                current = self.node.motor6_position_rad
-                direction = 1.0 if self.motor6_command_rpm >= 0.0 else -1.0
-                remaining_mm = (
-                    direction
-                    * (self.motor6_distance_target_rad - current)
-                    * (MOTOR6_PULLEY_DIAMETER_MM / 2.0)
-                    if current is not None
-                    else math.inf
-                )
-                speed_mm_s = abs(self.node.motor6_velocity_rad_s or 0.0) * (
-                    MOTOR6_PULLEY_DIAMETER_MM / 2.0
-                )
-                deceleration = self.motor6_distance_deceleration_mm_s2 or 1.0
-                stopping_distance_mm = speed_mm_s * speed_mm_s / (2.0 * deceleration)
-                reached = remaining_mm <= max(0.3, stopping_distance_mm)
-                if reached:
-                    self.motor6_running = False
-                    self.motor6_command_rpm = 0.0
-                    self.motor6_distance_active = False
-                    self.motor6_distance_target_rad = None
-                    self.node.publish_motor6(0.0)
-                    self.status_text.set("Motor 6 distance step braking; guarded stop requested.")
-                else:
-                    self.node.publish_motor6(self.motor6_command_rpm)
-            else:
-                self.node.publish_motor6(self.motor6_command_rpm)
+            self.node.publish_motor6(self.motor6_command_rpm)
 
         if self.node.axis1_position_m is None:
             self.axis1_feedback.set("Waiting for Motor 1 feedback")
@@ -1287,12 +1390,12 @@ class YuzuOperatorGui:
             self.motor6_feedback.set("Waiting for Motor 6 feedback")
         else:
             rpm = self.node.motor6_velocity_rad_s * 30.0 / math.pi
-            belt_speed_mm_s = rpm * math.pi * MOTOR6_PULLEY_DIAMETER_MM / 60.0
+            belt_speed_mm_s = rpm * math.pi * MOTOR6_PULLEY_DIAMETER_MM * TRANSMISSION_RATIO * TRAVEL_CALIBRATION / 60.0
             state = "FEEDBACK LIVE" if fresh["motor6"] else "FEEDBACK STALE"
             position_text = "Encoder travel: unavailable"
             if self.node.motor6_position_rad is not None:
                 position_text = (
-                    f"Encoder travel: {self.node.motor6_position_rad * MOTOR6_PULLEY_DIAMETER_MM / 2.0:.2f} mm"
+                    f"Encoder travel: {self.node.motor6_position_rad * MOTOR6_PULLEY_DIAMETER_MM * TRANSMISSION_RATIO * TRAVEL_CALIBRATION / 2.0:.2f} mm"
                 )
             self.motor6_feedback.set(
                 f"{state} · Actual speed: {belt_speed_mm_s:.2f} mm/s\n{position_text}"
@@ -1317,7 +1420,9 @@ class YuzuOperatorGui:
         self.connection_text.set(
             f"Control paths: {connected_count}/6 · feedback: {fresh_count}/6 · drives enabled: {status_count}/6"
         )
-        if status_count == len(backend) and self.operation_step_index < len(self.operation_steps):
+        if (status_count == len(backend) and self.operation_step_index < len(self.operation_steps)
+                and not self.motor6_pending and not self.operation_conveyor_request
+                and self._operation_conveyor_ready()):
             self.operation_next_button.configure(state="normal")
         else:
             self.operation_next_button.configure(state="disabled")

@@ -73,11 +73,7 @@
         <param name="min">-0.00001</param>
         <param name="max">0.020</param>
       </command_interface>
-      <command_interface name="velocity">
-        <!-- Motor 6 conveyor: 80% of the 60 rpm output maximum. -->
-        <param name="min">-5.026548245743669</param>
-        <param name="max">5.026548245743669</param>
-      </command_interface>
+      <command_interface name="motor6_position"/>
       <command_interface name="motor5_position"/>
       <state_interface name="position"/>
       <state_interface name="velocity"/>
@@ -100,7 +96,7 @@
         -->
         <param name="mode_of_operation">8</param>
         <param name="secondary_cia402_object_index_offset">0x1000</param>
-        <param name="secondary_mode_of_operation">9</param>
+        <param name="secondary_mode_of_operation">8</param>
         <param name="tertiary_cia402_object_index_offset">0x0800</param>
         <param name="tertiary_mode_of_operation">8</param>
         <param name="slave_config">$(find motor_controller)/config/azd3a_motor4_motor6_slave.yaml</param>

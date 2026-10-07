@@ -51,8 +51,9 @@ command-profile settings, not claims of manufacturer-rated acceleration.
 - A positioning move must have enough travel to accelerate and brake. A short
   move may begin decelerating before it reaches the configured speed cap, even
   though the acceleration setting would reach that cap in its configured ramp
-  time on a long enough move. For example, Motor 6's 30 mm step is shorter than the distance
-  needed to accelerate to 48 rpm and stop with the 96 rpm/s profile. At Motor
+  time on a long enough move. Motor 6's current 140.825 mm step exceeds the
+  approximately 37.70 mm acceleration-plus-braking distance at 48 rpm and
+  96 rpm/s; the former 30 mm step was too short to reach that cap. At Motor
   1's 480 mm/s cap and 480 mm/s² ramp, a rest-to-rest move needs about 480 mm
   to accelerate and brake, exceeding its 400 mm guarded stroke.
 - The Motor 1 profile requires 0.48 m/s² on a loaded vertical assembly. No

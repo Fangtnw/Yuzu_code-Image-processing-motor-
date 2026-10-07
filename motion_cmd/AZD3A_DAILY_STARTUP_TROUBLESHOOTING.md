@@ -100,14 +100,16 @@ motor2_raw_velocity_controller
 motor3_raw_position_controller
 motor4_raw_position_controller
 motor5_raw_position_controller
-motor6_raw_velocity_controller
+motor6_raw_position_controller
 ```
 
 Motor 5 and Motor 6 are included in the combined GUI. Motor 6 uses guarded
 topic `/motor6_conveyor/commands_rpm`, a +/-48 output-rpm ceiling, 96 rpm/s
 software ramp, and 0.5-second watchdog. Positive RPM is the physically verified
-forward direction. The GUI accepts belt speed in mm/s and relative distance
-steps; 48 rpm gives approximately 75.40 mm/s on the 30 mm pulley.
+forward direction. The GUI accepts belt speed in mm/s and requests fixed
+140.825 mm indexed steps; 48 rpm gives approximately 75.40 mm/s on the 30 mm
+pulley. Indexing runs in the backend and retains interrupted targets for
+explicit resume. See `MOTOR6_INDEXING.md` for the new command/status interface.
 
 Current linear speed caps are Motor 1 at 480 mm/s and Motors 3/4 at 32 mm/s,
 all at 80% of their published maximums. Motor 1 uses a 480 mm/s² ramp (1 s to

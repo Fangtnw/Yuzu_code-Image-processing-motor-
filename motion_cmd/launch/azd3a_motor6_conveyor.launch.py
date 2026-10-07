@@ -33,8 +33,10 @@ def generate_launch_description() -> LaunchDescription:
         [
             control_node,
             Node(package="controller_manager", executable="spawner", arguments=["joint_state_broadcaster", "-c", "/controller_manager"], output="screen"),
-            Node(package="controller_manager", executable="spawner", arguments=["motor6_raw_velocity_controller", "-c", "/controller_manager"], output="screen"),
-            Node(package="motor_controller", executable="azd3a_motor6_conveyor_guard", output="screen"),
+            Node(package="controller_manager", executable="spawner", arguments=["motor6_raw_position_controller", "-c", "/controller_manager"], output="screen"),
+            Node(package="motor_controller", executable="azd3a_motor6_conveyor_guard",
+                 parameters=[{"feedback_joint": "motor6_joint", "position_interface": "position"}],
+                 output="screen"),
             Node(package="robot_state_publisher", executable="robot_state_publisher", parameters=[robot_description], output="screen"),
             RegisterEventHandler(OnProcessExit(target_action=control_node, on_exit=[EmitEvent(event=Shutdown(reason="ros2_control_node exited"))])),
         ]
