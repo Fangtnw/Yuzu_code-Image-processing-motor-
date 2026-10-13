@@ -7,7 +7,7 @@ import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "motion_cmd"))
 from motor_controller.conveyor_index import (  # noqa: E402
-    ConveyorIndex, MM_PER_COUNT, MM_S_PER_RPM, NOMINAL_PITCH_MM,
+    ConveyorIndex, MM_PER_COUNT, MM_S_PER_RPM, NOMINAL_PITCH_MM, OPERATING_MAX_RPM,
 )
 
 
@@ -18,7 +18,7 @@ class ConveyorPlant:
         self.time = 0.0
         self.position = float(origin)
         self.velocity = 0.0
-        self.commands = deque([0.0] * drive_delay)
+        self.commands = deque([float(origin)] * drive_delay)
         self.samples = deque()
         self.feedback_delay = feedback_delay
         self.peak_rpm = 0.0
@@ -39,16 +39,17 @@ class ConveyorPlant:
                 self.motion.feedback(raw, velocity, enabled, stamp)
         if heartbeat and self.ticks % 20 == self.gui_phase:
             self.motion.heartbeat(self.time)
-        output = self.motion.update(self.time)
-        # Drive target velocity is an integer number of encoder counts/second.
-        self.commands.append(int(output * 500_000 / 60.0) * 60.0 / 500_000)
-        previous = self.velocity
-        command = self.commands.popleft()
-        self.velocity = 0.0 if stalled else command
+        self.motion.update(self.time)
+        self.commands.append(self.position if self.motion.command_counts is None
+                             else round(self.motion.command_counts))
+        command_position = self.commands.popleft()
+        self.velocity = (0.0 if stalled else
+                         (command_position - self.position) * MM_PER_COUNT / (MM_S_PER_RPM * dt))
         self.peak_rpm = max(self.peak_rpm, abs(self.velocity))
-        self.position += (previous + self.velocity) * 0.5 * MM_S_PER_RPM * dt / MM_PER_COUNT
+        if not stalled:
+            self.position = command_position
 
-    def request(self, direction=1, rpm=48.0):
+    def request(self, direction=1, rpm=OPERATING_MAX_RPM):
         index = self.motion.index if self.motion.origin_counts is not None else 0
         self.motion.request_index(index + direction, rpm, 96.0, 96.0, self.time)
 
@@ -67,8 +68,8 @@ class ConveyorIndexTests(unittest.TestCase):
         plant.request()
         plant.finish()
         travel = (plant.position - plant.origin) * MM_PER_COUNT
-        self.assertAlmostEqual(travel, 140.825, delta=0.0201)
-        self.assertAlmostEqual(plant.peak_rpm, 48.0, places=5)
+        self.assertAlmostEqual(travel, NOMINAL_PITCH_MM, delta=0.0201)
+        self.assertAlmostEqual(plant.peak_rpm, OPERATING_MAX_RPM, delta=0.1)
         self.assertEqual(plant.velocity, 0.0)
         self.assertEqual(plant.motion.index, 1)
 
@@ -77,11 +78,11 @@ class ConveyorIndexTests(unittest.TestCase):
         for index in range(1, 121):
             plant.request()
             plant.finish()
-            global_error = (plant.position - plant.origin) * MM_PER_COUNT - index * 140.825
+            global_error = (plant.position - plant.origin) * MM_PER_COUNT - index * NOMINAL_PITCH_MM
             self.assertLessEqual(abs(global_error), 0.0201, (index, global_error))
             self.assertAlmostEqual(
                 (plant.motion.target_counts - plant.origin) * MM_PER_COUNT,
-                index * 140.825, delta=MM_PER_COUNT / 2,
+                index * NOMINAL_PITCH_MM, delta=MM_PER_COUNT / 2,
             )
 
     def test_forward_reverse_returns_to_original_reference(self):
@@ -100,7 +101,7 @@ class ConveyorIndexTests(unittest.TestCase):
                 plant.request()
                 plant.finish()
                 self.assertAlmostEqual((plant.position - plant.origin) * MM_PER_COUNT,
-                                       140.825, delta=0.0201)
+                                       NOMINAL_PITCH_MM, delta=0.0201)
 
     def test_gui_poll_phase_does_not_decide_braking_or_endpoint(self):
         for phase in range(20):
@@ -108,7 +109,7 @@ class ConveyorIndexTests(unittest.TestCase):
             plant.request()
             plant.finish()
             self.assertAlmostEqual((plant.position - plant.origin) * MM_PER_COUNT,
-                                   140.825, delta=0.0201)
+                                   NOMINAL_PITCH_MM, delta=0.0201)
 
     def test_signed_encoder_rollover_in_each_direction(self):
         for origin, direction in ((2**31 - 10_000, 1), (-2**31 + 10_000, -1)):
@@ -116,7 +117,7 @@ class ConveyorIndexTests(unittest.TestCase):
             plant.request(direction)
             plant.finish()
             self.assertAlmostEqual((plant.position - origin) * MM_PER_COUNT,
-                                   direction * 140.825, delta=0.0201)
+                                   direction * NOMINAL_PITCH_MM, delta=0.0201)
 
     def test_stop_preserves_target_and_requires_explicit_resume(self):
         plant = ConveyorPlant()
@@ -130,14 +131,14 @@ class ConveyorIndexTests(unittest.TestCase):
         self.assertEqual(plant.motion.state, "interrupted")
         self.assertEqual(plant.motion.target_counts, target)
         with self.assertRaises(ValueError):
-            plant.motion.request_index(1, 48., 96., 96., plant.time)
+            plant.motion.request_index(1, OPERATING_MAX_RPM, 96., 96., plant.time)
         plant.motion.resume(plant.time)
         plant.finish()
         self.assertEqual(plant.motion.target_counts, target)
         plant.request()
         plant.finish()
         self.assertAlmostEqual((plant.position - plant.origin) * MM_PER_COUNT,
-                               2 * 140.825, delta=0.0201)
+                               2 * NOMINAL_PITCH_MM, delta=0.0201)
 
     def test_watchdog_feedback_loss_and_disabled_drive_stop_without_completing(self):
         for failure in (dict(heartbeat=False), dict(feedback=False), dict(enabled=False)):
@@ -170,12 +171,12 @@ class ConveyorIndexTests(unittest.TestCase):
         plant = ConveyorPlant()
         plant.request()
         target = plant.motion.target_counts
-        plant.motion.request_index(1, 48., 96., 96., plant.time)
+        plant.motion.request_index(1, OPERATING_MAX_RPM, 96., 96., plant.time)
         self.assertEqual(plant.motion.target_counts, target)
         with self.assertRaises(ValueError):
-            plant.motion.request_index(2, 48., 96., 96., plant.time)
+            plant.motion.request_index(2, OPERATING_MAX_RPM, 96., 96., plant.time)
         plant.finish()
-        plant.motion.request_index(1, 48., 96., 96., plant.time)
+        plant.motion.request_index(1, OPERATING_MAX_RPM, 96., 96., plant.time)
         self.assertEqual(plant.motion.state, "ready")
         self.assertEqual(plant.motion.index, 1)
 
@@ -185,8 +186,9 @@ class ConveyorIndexTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 ConveyorIndex(**kwargs)
         plant = ConveyorPlant()
-        for args in ((1, 0, 96, 96), (1, 49, 96, 96), (1, 48, 1, 96),
-                     (1, 48, 96, 1), (1, float("nan"), 96, 96), (0.5, 48, 96, 96)):
+        for args in ((1, 0, 96, 96), (1, OPERATING_MAX_RPM + 1, 96, 96),
+                     (1, OPERATING_MAX_RPM, 1, 96), (1, OPERATING_MAX_RPM, 96, 1),
+                     (1, float("nan"), 96, 96), (0.5, OPERATING_MAX_RPM, 96, 96)):
             with self.assertRaises(ValueError):
                 plant.motion.request_index(*args, plant.time)
         self.assertIsNone(plant.motion.origin_counts)

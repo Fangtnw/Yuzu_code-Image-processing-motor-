@@ -5,12 +5,17 @@ import math
 import rclpy
 from control_msgs.msg import DynamicJointState
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile
 from std_msgs.msg import Empty, Float64, Float64MultiArray
 
 
 COMMAND_TOPIC = "/motor5_position_controller/commands_deg"
 MANUAL_STEP_TOPIC = "/motor5_position_controller/manual_step_deg"
 SET_ZERO_TOPIC = "/motor5_position_controller/set_zero"
+EXTERNAL_COMMAND_TOPIC = "/yuzu/motor5/target_position_deg"
+EXTERNAL_STEP_TOPIC = "/yuzu/motor5/jog_deg"
+EXTERNAL_ZERO_TOPIC = "/yuzu/motor5/set_zero"
+ZERO_POSITION_TOPIC = "/yuzu/motor5/zero_position_rad"
 RAW_TOPIC = "/motor5_raw_position_controller/commands"
 JOINT_NAME = "motor4_joint"
 INTERFACE_NAME = "motor5_position"
@@ -30,9 +35,14 @@ class Motor5PositionGuard(Node):
         self.command_velocity = 0.0
         self.manual_step_active = False
         self.raw_publisher = self.create_publisher(Float64MultiArray, RAW_TOPIC, 10)
+        zero_qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        self.zero_publisher = self.create_publisher(Float64, ZERO_POSITION_TOPIC, zero_qos)
         self.create_subscription(Float64, COMMAND_TOPIC, self.on_command, 10)
+        self.create_subscription(Float64, EXTERNAL_COMMAND_TOPIC, self.on_command, 10)
         self.create_subscription(Float64, MANUAL_STEP_TOPIC, self.on_manual_step, 10)
+        self.create_subscription(Float64, EXTERNAL_STEP_TOPIC, self.on_manual_step, 10)
         self.create_subscription(Empty, SET_ZERO_TOPIC, self.on_set_zero, 10)
+        self.create_subscription(Empty, EXTERNAL_ZERO_TOPIC, self.on_set_zero, 10)
         self.create_subscription(
             DynamicJointState, "/dynamic_joint_states", self.on_dynamic_state, 10
         )
@@ -66,6 +76,7 @@ class Motor5PositionGuard(Node):
             self.get_logger().error("REJECTED Motor 5 zero: commanded motion is active")
             return
         self.origin = self.measured_position
+        self.zero_publisher.publish(Float64(data=self.origin))
         self.manual_step_active = False
         self.command_position = self.measured_position
         self.target_position = self.measured_position

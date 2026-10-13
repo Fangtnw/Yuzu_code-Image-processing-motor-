@@ -5,7 +5,7 @@ import math
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import JointState
-from std_msgs.msg import Float64MultiArray
+from std_msgs.msg import Float64, Float64MultiArray
 
 
 # Manufacturer envelope for Motor 1's EZSM3LD040AZAK linear slide.
@@ -27,6 +27,7 @@ DEFAULT_MAX_VELOCITY_M_S = 0.480
 DEFAULT_MAX_ACCELERATION_M_S2 = 0.480
 UPDATE_RATE_HZ = 200.0
 PUBLIC_TOPIC = "/motor1_position_controller/commands"
+EXTERNAL_TOPIC = "/yuzu/motor1/target_position_mm"
 LEGACY_PUBLIC_TOPIC = "/axis1_position_controller/commands"
 RAW_TOPIC = "/motor1_raw_position_controller/commands"
 LEGACY_RAW_TOPIC = "/axis1_raw_position_controller/commands"
@@ -62,6 +63,7 @@ class Axis1CommandGuard(Node):
         self.legacy_raw_publisher = self.create_publisher(Float64MultiArray, LEGACY_RAW_TOPIC, 10)
         self.create_subscription(Float64MultiArray, PUBLIC_TOPIC, self.on_command, 10)
         self.create_subscription(Float64MultiArray, LEGACY_PUBLIC_TOPIC, self.on_command, 10)
+        self.create_subscription(Float64, EXTERNAL_TOPIC, self.on_external_command, 10)
         self.create_subscription(JointState, "/joint_states", self.on_joint_state, 10)
         self.create_timer(1.0 / UPDATE_RATE_HZ, self.update_command)
 
@@ -124,6 +126,9 @@ class Axis1CommandGuard(Node):
         self.operator_command_received = True
         self.target_position = target
         self.get_logger().info(f"Accepted Axis 1 target {target * 1000:.3f} mm")
+
+    def on_external_command(self, message: Float64) -> None:
+        self.on_command(Float64MultiArray(data=[message.data / 1000.0]))
 
     def publish_raw(self) -> None:
         message = Float64MultiArray()

@@ -6,6 +6,8 @@ raw ros2_control topics. It shows per-axis ROS feedback freshness and guard
 topic connections and drive statuswords. Motion readiness requires fresh
 feedback and all six drives in Operation Enabled. This software indication
 is not an independent safety interlock or a substitute for a hardware stop.
+The external GUI topic names, message types, units, and conveyor request
+protocol are specified in `MOTOR_ROS2_INTERFACE.md`.
 
 ## Safety boundary
 
@@ -30,9 +32,10 @@ is not an independent safety interlock or a substitute for a hardware stop.
   32 mm/s velocity and symmetric 64 mm/s^2 ramps, reaching the cap in 0.5 s.
   The acceleration is below the DR28's published 200 mm/s² maximum. Motor 3 uses
   the custom `motor3_position` interface on slave 0 Axis 3.
-- Motor 6 indexes 140.825 mm per step and is limited to 48 rpm (75.4 mm/s belt speed), 80% of its 60 rpm
-  output maximum. The GUI defaults to that speed and a 96 rpm/s software ramp,
-  reaching cap in 0.5 s; acc/dec entries are constrained to satisfy that time.
+- Motor 6 indexes 140 mm per step and is limited to 90 mm/s belt speed
+  (about 40.35 rpm at the calibrated conversion). The GUI defaults to that
+  speed and a 96 rpm/s software ramp, reaching the cap within 0.5 s;
+  acc/dec entries are constrained to satisfy that time.
   The 0.5-second watchdog remains, refreshed by index heartbeats during a
   step or speed commands during manual running. Backend indexing requires
   position, velocity and enabled status together, no older than 0.1 s. Positive RPM
@@ -52,8 +55,8 @@ eventually requires it.
 
 The 0.5 s acceleration/deceleration time is the ramp to/from a requested speed,
 not a guarantee that every positioning move reaches that speed. Short moves
-must decelerate early. Motor 6's 140.825 mm step has sufficient distance to
-reach the 48 rpm cap and brake with its 96 rpm/s ramp. Motors 2–5 are intended to
+must decelerate early. Motor 6's 140 mm step has sufficient distance to
+reach the current speed cap and brake with its 96 rpm/s ramp. Motors 2–5 are intended to
 run simultaneously in part of the sequence; staged combined-load validation
 is required before using all their caps together. Exact official catalog
 sources and calculations are in `vendor/oriental_motor/MOTOR_SPEED_SOURCES.md`.
@@ -98,7 +101,7 @@ are software profiles, not manufacturer acceleration ratings. While rotation is 
 refreshes the command so the existing 0.5-second watchdog does
 not stop it. Motor 3 and Motor 4 entries are absolute millimetres from their ABZO
 coordinate. Motor 6 entries and feedback are belt speed in mm/s, with a
-read-only 140.825 mm index step. The first step captures the stopped position
+read-only 140 mm index step. The first step captures the stopped position
 as the grid reference; subsequent targets use the index number and that same
 reference, without accumulating previous stop errors. The backend generates
 an absolute CSP position trajectory internally. Continuous Motor 6 manual
@@ -139,7 +142,7 @@ of encoder-derived travel and measured motion has settled. Status shows the
 remaining signed encoder error. Heartbeat/feedback loss, a missed control
 deadline or a movement timeout interrupts the step instead of reporting success.
 
-The requested 140.825 mm is a rounded, drawing-derived nominal value for
+The requested 140 mm is a nominal value for
 12 fixtures. It has not been physically calibrated. Count scaling, belt slip,
 stretch, gearbox backlash and fixture placement can affect actual belt travel;
 the software settling threshold is not a conveyor accuracy guarantee. Check

@@ -4,10 +4,16 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'motion_cmd'))
-from motor_controller.conveyor_index import ConveyorIndex, MM_PER_COUNT, OPERATING_MAX_RPM
+from motor_controller.conveyor_index import ConveyorIndex, MM_PER_COUNT, OPERATING_MAX_RPM, TRANSMISSION_RATIO, TRAVEL_CALIBRATION
 
 
 class CspTests(unittest.TestCase):
+    def test_confirmed_ratio_preserves_physical_calibration(self):
+        self.assertAlmostEqual(TRANSMISSION_RATIO, 25 / 18)
+        self.assertAlmostEqual(TRAVEL_CALIBRATION, 1.0224)
+        self.assertAlmostEqual(1 / MM_PER_COUNT, 3736.031527978765)
+        self.assertAlmostEqual(OPERATING_MAX_RPM, 40.34914050217066)
+
     def test_velocity_noise_with_stationary_encoder(self):
         motion = ConveyorIndex()
         for i in range(101):

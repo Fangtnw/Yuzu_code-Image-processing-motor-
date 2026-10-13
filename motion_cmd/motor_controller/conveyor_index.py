@@ -9,8 +9,12 @@ import math
 
 COUNTS_PER_TURN = 500_000
 COUNTS_PER_RAD = COUNTS_PER_TURN / (2.0 * math.pi)
-TRANSMISSION_RATIO = 1.4  # Provisional motor pulley / roller pulley tooth ratio.
-TRAVEL_CALIBRATION = 142.0 / 140.0  # Repeated physical measurements at 30 and 90 mm/s.
+MOTOR_PULLEY_TEETH = 25
+CONVEYOR_PULLEY_TEETH = 18
+TRANSMISSION_RATIO = MOTOR_PULLEY_TEETH / CONVEYOR_PULLEY_TEETH
+# Preserve the measured effective scale (1.4 * 142/140 = 1.42) when
+# replacing the old diameter-based estimate with the confirmed tooth ratio.
+TRAVEL_CALIBRATION = (1.4 * 142.0 / 140.0) / TRANSMISSION_RATIO
 ROLLER_DIAMETER_MM = 30.0
 MM_PER_COUNT = math.pi * ROLLER_DIAMETER_MM * TRANSMISSION_RATIO * TRAVEL_CALIBRATION / COUNTS_PER_TURN
 MM_S_PER_RPM = math.pi * ROLLER_DIAMETER_MM * TRANSMISSION_RATIO * TRAVEL_CALIBRATION / 60.0

@@ -9,6 +9,7 @@ from std_msgs.msg import Float64, Float64MultiArray
 
 
 PUBLIC_TOPIC = "/motor3_position_controller/commands_mm"
+EXTERNAL_TOPIC = "/yuzu/motor3/target_position_mm"
 RAW_TOPIC = "/motor3_raw_position_controller/commands"
 JOINT_NAME = "motor1_motor2"
 INTERFACE_NAME = "motor3_position"
@@ -30,6 +31,7 @@ class Motor3PositionGuard(Node):
         self.operator_command_received = False
         self.raw_publisher = self.create_publisher(Float64MultiArray, RAW_TOPIC, 10)
         self.create_subscription(Float64, PUBLIC_TOPIC, self.on_command, 10)
+        self.create_subscription(Float64, EXTERNAL_TOPIC, self.on_command, 10)
         self.create_subscription(
             DynamicJointState, "/dynamic_joint_states", self.on_dynamic_state, 10
         )

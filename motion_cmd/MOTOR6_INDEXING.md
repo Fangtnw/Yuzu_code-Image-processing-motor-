@@ -2,18 +2,21 @@
 
 ## Current trial calibration
 
-Subsequent repeated measurements at 30 and 90 mm/s showed 142 mm physical
-travel for 140 mm displayed travel. TRAVEL_CALIBRATION=142/140 now multiplies
-the provisional transmission conversion for both distance and speed. This is
-an empirical correction, not a confirmed timing-pulley tooth ratio. Revalidate
-physical travel after applying it.
+On 2026-10-13 the operator confirmed 25 motor-pulley teeth and 18
+conveyor-pulley teeth: the mechanical ratio is 25/18 = 1.388888889.
+Repeated measurements at 30 and 90 mm/s previously showed 142 mm physical
+travel for 140 mm displayed travel using the provisional 1.4 ratio.
+The manual calibration is therefore rebased to (1.4 * 142/140)/(25/18)
+= 1.0224. The product of mechanical ratio and calibration remains 1.42;
+this preserves the current distance and speed commands and displays.
+Calibration is empirical and does not change the confirmed tooth counts.
 
 The current requirement is 140 mm per step (1680 mm / 12), at 90 mm/s.
-The motor/roller timing transmission is provisionally 1.4, inferred from
-28/20 mm pulley outer diameters and 41.85 mm measured travel for a displayed
-30 mm. Confirm tooth counts and physical travel before accepting accuracy.
-This gives 3789.403407 counts/mm, 530516 counts/step, and 40.925557 output rpm
-at 90 mm/s. Older calculations below describe the previous 1:1 assumption.
+The retained effective scale gives 3736.031528 counts/mm, 523044 counts/step,
+and 40.349141 gearbox-output rpm at 90 mm/s. Roller diameter is nominally
+30 mm; the calibration is equivalent to an effective diameter of 30.672 mm.
+Physical repeatability and full-circuit registration still need validation.
+Older calculations below describe previous assumptions.
 
 ## Current requirement and implementation
 
@@ -26,9 +29,8 @@ The GUI also provides a bounded relative CSP jog of up to 200 mm. A jog clears
 the old fixture grid when it completes; align the visible mark and use the
 reference command before indexing again.
 
-The operator confirmed 12 fixtures and requested **140.825 mm per step** at
-80% of Motor 6's documented 60 rpm maximum: **48 rpm**, nominally
-75.3982 mm/s using the existing 30 mm pulley conversion. Acceleration and
+The current requirement is **140 mm per step** for 12 fixtures at
+**90 mm/s** (about 40.35 output rpm with the calibrated conversion). Acceleration and
 deceleration remain 96 rpm/s. No sensor is installed. The current scope is
 accurate encoder-based stepping; no fixture-mark confirmation workflow was added.
 
@@ -55,19 +57,20 @@ backend completion before enabling the placement stage.
 
 ## Command and feedback interfaces
 
-- Existing `/motor6_conveyor/commands_rpm`: `[rpm]` or
-  `[rpm, acceleration, deceleration]` for manual speed; zero always requests
-  a controlled stop. Nonzero manual commands cannot override an active index.
-- `/motor6_conveyor/index_request`: `std_msgs/String` JSON with `id` (unique
+- Existing `/motor6_conveyor/commands_rpm`: `[0.0]` requests a controlled
+  stop. Nonzero manual commands are rejected in the integrated CSP mode.
+- Preferred `/yuzu/motor6/index_request`: `std_msgs/String` JSON with `id` (unique
   request ID), `session` (current backend boot ID), `reference_id`, `sent_ns`
-  (ROS-clock nanoseconds), and `op` (`index`, `resume`, or `reference`). An
+  (ROS-clock nanoseconds), and `op` (`index`, `jog`, `resume`, or `reference`). An
   `index` request also supplies integer `index`, `rpm`, `acceleration`, and
   `deceleration`. Only an adjacent target is accepted. Repeated request IDs
-  do not restart a move; requests predating a stop or older than 0.5 s are
-  rejected. An explicit `reference` operation resets the grid while stopped.
-- `/motor6_conveyor/index_heartbeat`: `std_msgs/String` containing the accepted
-  request ID, refreshed during an index. The watchdog remains 0.5 s.
-- `/motor6_conveyor/index_status`: `std_msgs/String` JSON with request
+  refresh the watchdog without restarting a move. Requests predating a stop or
+  older than 0.5 s are rejected on first receipt. An explicit `reference`
+  operation resets the grid while stopped.
+- Repeat the same accepted request about every 100 ms during motion; the
+  watchdog remains 0.5 s. The older `/motor6_conveyor/index_heartbeat` and
+  `/yuzu/motor6/index_heartbeat` topics remain supported for existing clients.
+- Preferred `/yuzu/motor6/index_status`: `std_msgs/String` JSON with request
   acknowledgement, state, current/target index, pitch, remaining error,
   stationary/fresh flags and raw unwrapped origin/position/target counts.
 - A complete `/dynamic_joint_states` sample supplies position, velocity and
@@ -78,7 +81,7 @@ backend completion before enabling the placement stage.
   `velocity` and the newly exported `motor6_status`.
 
 Guard startup parameter `index_loop_counts` defaults to the count equivalent
-of `12 * 140.825 mm`, using the existing 30 mm pulley scale. A measured full
+of `12 * 140 mm`, using the calibrated conversion. A measured full
 belt-circuit count value can replace it during later calibration; keep the
 full value internally. `index_tolerance_mm` defaults to 0.02 and permits only
 one encoder count through 0.1 mm. GUI pitch fields are read-only backend values.
@@ -132,20 +135,22 @@ ordering calculation, not a precision fixture-indexing specification.
 2. The PDO scale matches the commissioning record: 500,000 counts/output
    revolution. The old encoder-scale error is not present in this source.
    This does not establish live physical belt calibration.
-3. The new tests execute the motion model with integer encoder/velocity PDOs.
-   They cover 120 consecutive 140.825 mm steps (ten circuits), reversals,
+3. The current tests execute the motion model with integer encoder feedback
+   and an absolute CSP position target. They cover 120 consecutive 140 mm
+   steps (ten circuits), reversals,
    both signed encoder rollovers, all 20 phases of a 100 ms GUI refresh,
    drive delays through 30 ms and feedback delays through 20 ms. Settled
    error stays within 0.0201 mm against the original ideal target grid
    (the extra 0.0001 mm in the physical simulation comparison accommodates
-   half-count quantization). Peak speed reaches 48 rpm.
+   half-count quantization). Peak speed reaches about 40.35 rpm.
 4. Callback/GUI tests cover missing/stale/invalid feedback, drive faults,
    watchdog expiry, stalls, missed deadlines, duplicate commands, a command
    arriving after Stop, acknowledgements, explicit resume, and blocking the
    placement stage until its matching index is complete.
-5. All 52 repository tests pass; Python compilation, combined/standalone
-   xacro expansion and an isolated `motor_controller` package build pass.
-   ROS modules/launch descriptions are checked without starting hardware.
+5. The current offline suite passes 64 tests. Previous validation also
+   included Python compilation, combined/standalone xacro expansion and an
+   isolated `motor_controller` package build; those checks were not repeated
+   for this interface update.
 
 Run the offline checks from the repository root:
 
@@ -165,7 +170,7 @@ belt accuracy. No live motor command or live-workspace rebuild was issued.
    reference: `origin_counts + round(index * measured_loop_counts / count)`.
    Never start the next target from the previous measured stop, and never
    repeatedly add a separately rounded count increment.
-3. Measure a marked 140.825 mm move and repeated full circuits after rebuilding
+3. Measure a marked 140 mm move and repeated full circuits after rebuilding
    and restarting the control session. Check endpoint error, stopping, direction
    and alarms under the intended load. The former 100 ms GUI loop is no longer
    involved in stopping decisions, but belt scaling still requires measurement.

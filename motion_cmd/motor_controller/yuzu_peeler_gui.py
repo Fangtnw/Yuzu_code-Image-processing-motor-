@@ -10,23 +10,26 @@ from tkinter import messagebox, ttk
 import rclpy
 from control_msgs.msg import DynamicJointState
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import JointState
 from std_msgs.msg import Empty, Float64, Float64MultiArray, String
 
 from motor_controller.conveyor_index import NOMINAL_PITCH_MM, TRANSMISSION_RATIO, TRAVEL_CALIBRATION, OPERATING_MAX_RPM, OPERATING_SPEED_MM_S
 
 
-MOTOR1_TOPIC = "/motor1_position_controller/commands"
-MOTOR2_TOPIC = "/motor2_velocity_controller/commands_rpm"
-MOTOR3_TOPIC = "/motor3_position_controller/commands_mm"
-MOTOR4_TOPIC = "/motor4_position_controller/commands_mm"
-MOTOR5_TOPIC = "/motor5_position_controller/commands_deg"
-MOTOR5_SET_ZERO_TOPIC = "/motor5_position_controller/set_zero"
-MOTOR5_MANUAL_STEP_TOPIC = "/motor5_position_controller/manual_step_deg"
-MOTOR6_TOPIC = "/motor6_conveyor/commands_rpm"
-MOTOR6_INDEX_TOPIC = "/motor6_conveyor/index_request"
-MOTOR6_HEARTBEAT_TOPIC = "/motor6_conveyor/index_heartbeat"
-MOTOR6_STATUS_TOPIC = "/motor6_conveyor/index_status"
+MOTOR1_TOPIC = "/yuzu/motor1/target_position_mm"
+MOTOR2_TOPIC = "/yuzu/motor2/target_velocity_rpm"
+MOTOR2_PROFILE_TOPIC = "/motor2_velocity_controller/commands_rpm"
+MOTOR3_TOPIC = "/yuzu/motor3/target_position_mm"
+MOTOR4_TOPIC = "/yuzu/motor4/target_position_mm"
+MOTOR5_TOPIC = "/yuzu/motor5/target_position_deg"
+MOTOR5_SET_ZERO_TOPIC = "/yuzu/motor5/set_zero"
+MOTOR5_MANUAL_STEP_TOPIC = "/yuzu/motor5/jog_deg"
+MOTOR5_ZERO_POSITION_TOPIC = "/yuzu/motor5/zero_position_rad"
+MOTOR6_TOPIC = "/yuzu/motor6/stop"
+MOTOR6_PROFILE_TOPIC = "/motor6_conveyor/commands_rpm"
+MOTOR6_INDEX_TOPIC = "/yuzu/motor6/index_request"
+MOTOR6_STATUS_TOPIC = "/yuzu/motor6/index_status"
 AXIS1_MIN_MM = 0.0
 AXIS1_MAX_MM = 400.0
 AXIS1_INCREMENT_MM = 0.0012
@@ -49,7 +52,7 @@ MOTOR5_HARDWARE_STEP_DEG = 0.0018
 MOTOR5_VELOCITY_RPM = 120.0  # 80% of the FC20 output rating, 150 rpm
 MOTOR5_ACCELERATION_RPM_S = 240.0  # reaches 120 rpm in 0.5 s; software ramp, no catalog max
 MOTOR6_GUI_MAX_RPM = OPERATING_MAX_RPM
-MOTOR6_ACCELERATION_RPM_S = 96.0  # reaches 48 rpm in 0.5 s; software ramp, no catalog max
+MOTOR6_ACCELERATION_RPM_S = 96.0  # reaches the current cap within 0.5 s; software ramp
 MOTOR6_PULLEY_DIAMETER_MM = 30.0
 MOTOR6_GUI_MAX_MM_S = OPERATING_SPEED_MM_S
 FEEDBACK_STALE_S = 2.0
@@ -136,19 +139,22 @@ def checked_motor6_speed_mm_s(requested_mm_s: float) -> float:
 class YuzuOperatorNode(Node):
     def __init__(self) -> None:
         super().__init__("yuzu_peeler_gui")
-        self.motor1_publisher = self.create_publisher(Float64MultiArray, MOTOR1_TOPIC, 10)
-        self.motor2_publisher = self.create_publisher(Float64MultiArray, MOTOR2_TOPIC, 10)
+        self.motor1_publisher = self.create_publisher(Float64, MOTOR1_TOPIC, 10)
+        self.motor2_publisher = self.create_publisher(Float64, MOTOR2_TOPIC, 10)
+        self.motor2_profile_publisher = self.create_publisher(Float64MultiArray, MOTOR2_PROFILE_TOPIC, 10)
         self.motor3_publisher = self.create_publisher(Float64, MOTOR3_TOPIC, 10)
         self.motor4_publisher = self.create_publisher(Float64, MOTOR4_TOPIC, 10)
         self.motor5_publisher = self.create_publisher(Float64, MOTOR5_TOPIC, 10)
         self.motor5_zero_publisher = self.create_publisher(Empty, MOTOR5_SET_ZERO_TOPIC, 10)
         self.motor5_manual_step_publisher = self.create_publisher(Float64, MOTOR5_MANUAL_STEP_TOPIC, 10)
-        self.motor6_publisher = self.create_publisher(Float64MultiArray, MOTOR6_TOPIC, 10)
+        self.motor6_publisher = self.create_publisher(Empty, MOTOR6_TOPIC, 10)
+        self.motor6_profile_publisher = self.create_publisher(Float64MultiArray, MOTOR6_PROFILE_TOPIC, 10)
         self.motor6_index_publisher = self.create_publisher(String, MOTOR6_INDEX_TOPIC, 1)
-        self.motor6_heartbeat_publisher = self.create_publisher(String, MOTOR6_HEARTBEAT_TOPIC, 1)
         self.motor6_index_status = {}
         self.motor6_index_status_time = None
         self.create_subscription(String, MOTOR6_STATUS_TOPIC, self._motor6_index_status, 1)
+        zero_qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
+        self.create_subscription(Float64, MOTOR5_ZERO_POSITION_TOPIC, self._motor5_zero_position, zero_qos)
         self.create_subscription(JointState, "/joint_states", self._joint_state, 1)
         self.create_subscription(
             DynamicJointState, "/dynamic_joint_states", self._dynamic_joint_state, 1
@@ -158,6 +164,7 @@ class YuzuOperatorNode(Node):
         self.motor3_position_m = None
         self.motor4_position_m = None
         self.motor5_position_rad = None
+        self.motor5_zero_position_rad = None
         self.motor6_position_rad = None
         self.motor6_velocity_rad_s = None
         self.drive_status = {f"motor{motor}": None for motor in range(1, 7)}
@@ -182,15 +189,16 @@ class YuzuOperatorNode(Node):
         self.motor6_index_status = status
         self.motor6_index_status_time = time.monotonic()
 
+    def _motor5_zero_position(self, message: Float64) -> None:
+        if math.isfinite(message.data):
+            self.motor5_zero_position_rad = message.data
+
     def motor6_status_fresh(self) -> bool:
         return (self.motor6_index_status_time is not None
                 and time.monotonic() - self.motor6_index_status_time <= 0.35)
 
     def publish_motor6_index(self, request: dict) -> None:
         self.motor6_index_publisher.publish(String(data=json.dumps(request, allow_nan=False)))
-
-    def publish_motor6_heartbeat(self, request_id: str) -> None:
-        self.motor6_heartbeat_publisher.publish(String(data=request_id))
 
     def _mark_feedback(self, motor: str) -> None:
         self.feedback_times[motor] = self.get_clock().now()
@@ -261,19 +269,19 @@ class YuzuOperatorNode(Node):
                     self._mark_feedback(motor)
 
     def publish_axis1(self, position_m: float) -> None:
-        message = Float64MultiArray()
-        message.data = [position_m]
+        message = Float64()
+        message.data = position_m * 1000.0
         self.motor1_publisher.publish(message)
 
     def publish_axis2(self, rpm: float) -> None:
-        message = Float64MultiArray()
-        message.data = [rpm]
+        message = Float64()
+        message.data = rpm
         self.motor2_publisher.publish(message)
 
     def publish_axis2_profile(self, rpm: float, acceleration: float, deceleration: float) -> None:
         message = Float64MultiArray()
         message.data = [rpm, acceleration, deceleration]
-        self.motor2_publisher.publish(message)
+        self.motor2_profile_publisher.publish(message)
 
     def publish_motor3(self, position_mm: float) -> None:
         message = Float64()
@@ -299,14 +307,14 @@ class YuzuOperatorNode(Node):
         self.motor5_zero_publisher.publish(Empty())
 
     def publish_motor6(self, rpm: float) -> None:
-        message = Float64MultiArray()
-        message.data = [rpm]
-        self.motor6_publisher.publish(message)
+        if rpm != 0.0:
+            raise ValueError("Motor 6 manual speed is unavailable in CSP mode")
+        self.motor6_publisher.publish(Empty())
 
     def publish_motor6_profile(self, rpm: float, acceleration: float, deceleration: float) -> None:
         message = Float64MultiArray()
         message.data = [rpm, acceleration, deceleration]
-        self.motor6_publisher.publish(message)
+        self.motor6_profile_publisher.publish(message)
 
     def feedback_age(self, motor: str) -> float | None:
         stamp = self.feedback_times[motor]
@@ -329,6 +337,7 @@ class YuzuOperatorGui:
         self.motor6_command_rpm = 0.0
         self.motor6_pending = None
         self.motor6_lease = None
+        self.motor6_lease_request = None
         self.operation_conveyor_request = None
         self.operation_conveyor_target = None
         self.motor5_origin_rad = None
@@ -1069,8 +1078,7 @@ class YuzuOperatorGui:
         ):
             return
         self.node.set_motor5_zero()
-        self.motor5_origin_rad = self.node.motor5_position_rad
-        self.status_text.set("Motor 5 zero request sent; verify the displayed relative position before moving.")
+        self.status_text.set("Motor 5 zero request sent; wait for the backend zero position before moving.")
 
     def move_motor5(self) -> None:
         if self.node.motor5_publisher.get_subscription_count() == 0:
@@ -1119,6 +1127,7 @@ class YuzuOperatorGui:
             messagebox.showerror("Invalid Motor 6 command", str(error))
             return
         self.motor6_lease = None
+        self.motor6_lease_request = None
         self.operation_conveyor_target = None
         self.motor6_command_rpm = rpm * self.motor6_direction.get()
         self.motor6_running = rpm > 0.0
@@ -1130,6 +1139,7 @@ class YuzuOperatorGui:
         self.motor6_command_rpm = 0.0
         self.motor6_pending = None
         self.motor6_lease = None
+        self.motor6_lease_request = None
         self.operation_conveyor_request = None
         self.node.publish_motor6(0.0)
         self.status_text.set("Motor 6 stop requested; interrupted index is retained for Resume.")
@@ -1145,6 +1155,7 @@ class YuzuOperatorGui:
                        sent_ns=self.node.get_clock().now().nanoseconds, **values)
         self.motor6_pending = dict(request, sent=time.monotonic())
         self.motor6_lease = request["id"] if operation in ("index", "resume", "jog") else None
+        self.motor6_lease_request = request if self.motor6_lease else None
         self.node.publish_motor6_index(request)
         self.status_text.set("Motor 6 index request sent; waiting for backend acceptance.")
         return True
@@ -1212,6 +1223,7 @@ class YuzuOperatorGui:
             self.status_text.set(status.get("request_message", "Conveyor request processed"))
             if not accepted:
                 self.motor6_lease = None
+                self.motor6_lease_request = None
             if self.operation_conveyor_request == pending["id"]:
                 self.operation_conveyor_request = None
                 if accepted:
@@ -1226,9 +1238,10 @@ class YuzuOperatorGui:
                 self.stop_motor6()
                 self.status_text.set("Conveyor index status lost; controlled stop requested.")
             elif self.motor6_pending or status.get("state") in ("indexing", "jogging"):
-                self.node.publish_motor6_heartbeat(self.motor6_lease)
+                self.node.publish_motor6_index(self.motor6_lease_request)
             else:
                 self.motor6_lease = None
+                self.motor6_lease_request = None
         if fresh:
             error = status.get("error_mm")
             error_text = "" if error is None else f" · Error {error:+.4f} mm"
@@ -1257,6 +1270,7 @@ class YuzuOperatorGui:
         self.motor6_running = False
         self.motor6_command_rpm = 0.0
         self.motor6_lease = None
+        self.motor6_lease_request = None
         self.motor6_pending = None
         self.operation_conveyor_request = None
         for _ in range(5):
@@ -1269,6 +1283,7 @@ class YuzuOperatorGui:
         # a GUI-rate queue. Motion itself runs in the independent 200 Hz guard.
         for _ in range(8):
             rclpy.spin_once(self.node, timeout_sec=0.0)
+        self.motor5_origin_rad = self.node.motor5_zero_position_rad
         self._update_motor6_index()
         backend = {
             "motor1": self.node.motor1_publisher.get_subscription_count() > 0

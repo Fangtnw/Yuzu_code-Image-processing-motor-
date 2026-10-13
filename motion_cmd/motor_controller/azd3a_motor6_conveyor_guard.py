@@ -9,7 +9,7 @@ from collections import OrderedDict
 import rclpy
 from control_msgs.msg import DynamicJointState
 from rclpy.node import Node
-from std_msgs.msg import Float64MultiArray, String
+from std_msgs.msg import Empty, Float64MultiArray, String
 
 from motor_controller.conveyor_index import (
     ConveyorIndex, COUNTS_PER_RAD, FEEDBACK_TIMEOUT_S, MM_PER_COUNT, NOMINAL_LOOP_MM, OPERATING_MAX_RPM,
@@ -21,6 +21,10 @@ RAW_TOPIC = "/motor6_raw_position_controller/commands"
 INDEX_TOPIC = "/motor6_conveyor/index_request"
 HEARTBEAT_TOPIC = "/motor6_conveyor/index_heartbeat"
 STATUS_TOPIC = "/motor6_conveyor/index_status"
+EXTERNAL_INDEX_TOPIC = "/yuzu/motor6/index_request"
+EXTERNAL_HEARTBEAT_TOPIC = "/yuzu/motor6/index_heartbeat"
+EXTERNAL_STATUS_TOPIC = "/yuzu/motor6/index_status"
+EXTERNAL_STOP_TOPIC = "/yuzu/motor6/stop"
 HARD_MAX_RPM = 60.0
 COMMISSIONING_MAX_RPM = OPERATING_MAX_RPM
 DEFAULT_ACCELERATION_RPM_S = 96.0
@@ -62,9 +66,13 @@ class Motor6ConveyorGuard(Node):
         self.last_stop_stamp = 0
         self.publisher = self.create_publisher(Float64MultiArray, RAW_TOPIC, 1)
         self.status_publisher = self.create_publisher(String, STATUS_TOPIC, 1)
+        self.external_status_publisher = self.create_publisher(String, EXTERNAL_STATUS_TOPIC, 1)
         self.create_subscription(Float64MultiArray, PUBLIC_TOPIC, self.on_command, 1)
+        self.create_subscription(Empty, EXTERNAL_STOP_TOPIC, self.on_external_stop, 1)
         self.create_subscription(String, INDEX_TOPIC, self.on_index_request, 1)
+        self.create_subscription(String, EXTERNAL_INDEX_TOPIC, self.on_index_request, 1)
         self.create_subscription(String, HEARTBEAT_TOPIC, self.on_heartbeat, 1)
+        self.create_subscription(String, EXTERNAL_HEARTBEAT_TOPIC, self.on_heartbeat, 1)
         self.create_subscription(DynamicJointState, "/dynamic_joint_states", self.on_feedback, 1)
         self.create_timer(UPDATE_PERIOD_S, self.update)
         self.create_timer(0.1, self.publish_status)
@@ -131,6 +139,9 @@ class Motor6ConveyorGuard(Node):
             self.get_logger().error(f"REJECTED Motor 6: {error}")
         self.publish_status()
 
+    def on_external_stop(self, _message: Empty) -> None:
+        self.on_command(Float64MultiArray(data=[0.0]))
+
     def on_index_request(self, message: String) -> None:
         request_id = None
         try:
@@ -143,6 +154,8 @@ class Motor6ConveyorGuard(Node):
             if request.get("session") != self.session:
                 raise ValueError("Backend restarted; refresh status and re-reference")
             if request_id in self.requests:
+                if request_id == self.lease and self.motion.state in ("indexing", "jogging"):
+                    self.motion.heartbeat(time.monotonic())
                 self.last_request = self.requests[request_id]
                 self.publish_status()
                 return
@@ -215,6 +228,7 @@ class Motor6ConveyorGuard(Node):
         message = String()
         message.data = json.dumps(status, allow_nan=False)
         self.status_publisher.publish(message)
+        self.external_status_publisher.publish(message)
 
 
 def main() -> None:

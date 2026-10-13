@@ -9,6 +9,7 @@ from std_msgs.msg import Float64, Float64MultiArray
 
 
 PUBLIC_TOPIC = "/motor4_position_controller/commands_mm"
+EXTERNAL_TOPIC = "/yuzu/motor4/target_position_mm"
 RAW_TOPIC = "/motor4_raw_position_controller/commands"
 JOINT_NAME = "motor4_joint"
 MIN_POSITION_MM = 0.0
@@ -35,6 +36,7 @@ class Motor4PositionGuard(Node):
 
         self.raw_publisher = self.create_publisher(Float64MultiArray, RAW_TOPIC, 10)
         self.create_subscription(Float64, PUBLIC_TOPIC, self.on_command, 10)
+        self.create_subscription(Float64, EXTERNAL_TOPIC, self.on_command, 10)
         self.create_subscription(JointState, "/joint_states", self.on_joint_state, 10)
         self.create_timer(1.0 / UPDATE_RATE_HZ, self.update_command)
         self.get_logger().info(

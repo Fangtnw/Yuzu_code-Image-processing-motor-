@@ -4,10 +4,11 @@ import math
 
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Float64MultiArray
+from std_msgs.msg import Float64, Float64MultiArray
 
 
 PUBLIC_TOPIC = "/motor2_velocity_controller/commands_rpm"
+EXTERNAL_TOPIC = "/yuzu/motor2/target_velocity_rpm"
 LEGACY_PUBLIC_TOPIC = "/axis2_velocity_controller/commands_rpm"
 RAW_TOPIC = "/motor2_raw_velocity_controller/commands"
 LEGACY_RAW_TOPIC = "/axis2_raw_velocity_controller/commands"
@@ -50,6 +51,7 @@ class Axis2VelocityGuard(Node):
         self.legacy_subscription = self.create_subscription(
             Float64MultiArray, LEGACY_PUBLIC_TOPIC, self.command_callback, 10
         )
+        self.create_subscription(Float64, EXTERNAL_TOPIC, self.on_external_command, 10)
         self.timer = self.create_timer(UPDATE_PERIOD_S, self.update)
         self.get_logger().info(
             f"Axis 2 guard ready: +/-{self.max_rpm:.1f} rpm, "
@@ -98,6 +100,9 @@ class Axis2VelocityGuard(Node):
             self.deceleration_rpm_s = deceleration
         self.target_rpm = requested_rpm
         self.last_command_time = self.get_clock().now()
+
+    def on_external_command(self, message: Float64) -> None:
+        self.command_callback(Float64MultiArray(data=[message.data]))
 
     def update(self) -> None:
         if self.last_command_time is None:

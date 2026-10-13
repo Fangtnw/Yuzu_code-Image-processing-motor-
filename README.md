@@ -51,6 +51,9 @@ For source review only, start with
 [`motion_cmd/launch/yuzu_peeler.launch.py`](motion_cmd/launch/yuzu_peeler.launch.py)
 and [`patches/README.md`](patches/README.md). No powered hardware is needed.
 
+For a GUI on a second laptop, use the guarded topic and message contract in
+[`motion_cmd/MOTOR_ROS2_INTERFACE.md`](motion_cmd/MOTOR_ROS2_INTERFACE.md).
+
 ## First-time setup on a new PC
 
 1. Follow [`UBUNTU_ETHERCAT_SETUP_GUIDE.md`](UBUNTU_ETHERCAT_SETUP_GUIDE.md)
@@ -137,11 +140,11 @@ sha256sum -c SHA256SUMS
 
 ## Current integrated axes
 
-The integrated interface uses one consistent public naming convention:
-`motor1` through `motor6` for topics, controller names, and guard executables.
-The old `axis1`/`axis2` command topics and executable names remain as
-compatibility aliases for existing commissioning scripts; new integrations
-should use the `motor*` names.
+The preferred public command topics use `/yuzu/motor1` through
+`/yuzu/motor6`, with units in the target topic names. Earlier `motor*` and
+`axis1`/`axis2` command topics remain available for existing commissioning
+scripts. New integrations should use the `/yuzu/motor*` contract in
+[`motion_cmd/MOTOR_ROS2_INTERFACE.md`](motion_cmd/MOTOR_ROS2_INTERFACE.md).
 
 | Motor | Function | GUI command units | Project operating limit |
 |---|---|---|---|
@@ -150,7 +153,7 @@ should use the `motor*` names.
 | 3 | gripping/feed slide | mm | 0–20 mm, 32 mm/s (80% of 40 mm/s actuator maximum) |
 | 4 | peeling-depth slide | mm | 0–20 mm, 32 mm/s (80% of 40 mm/s actuator maximum) |
 | 5 | peeler index | degrees from runtime zero | ±180°, 120 rpm (80% of 150 rpm output maximum) |
-| 6 | conveyor | mm/s and indexed distance steps | 75.4 mm/s (48 rpm, 80% of 60 rpm maximum), 140.825 mm per step |
+| 6 | conveyor | mm/s and indexed distance steps | 90 mm/s (about 40.35 rpm), 140 mm per step |
 
 Motor 1 ramps to/from its 480 mm/s cap in 1 s using 480 mm/s². Motors 2–6 use
 0.5 s profiles: Motor 2 665.6 rpm/s; Motors 3/4 64 mm/s²; Motor 5 240 rpm/s;
@@ -168,4 +171,4 @@ encoder error within 0.02 mm; this is a software threshold, not a measured
 belt accuracy specification. Stops retain the target for **Resume interrupted
 step**. Manual running or a backend restart starts a new reference grid.
 See [`motion_cmd/MOTOR6_INDEXING.md`](motion_cmd/MOTOR6_INDEXING.md) for the
-140.825 mm requirement, test evidence and physical validation still needed.
+140 mm requirement, test evidence and physical validation still needed.
