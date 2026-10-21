@@ -1,0 +1,27 @@
+# AZD3A-KED CiA402 slave config for ethercat_driver_ros2.
+# Source ESI: vendor/oriental_motor/ORIENTALMOTOR_AZDxA-KED_rev0301.xml
+# Verified live identity: vendor 0x02BE, product 0x13AF, revision 0x01110301.
+# Axis 1 / logical Motor 1: EZSM3LD040AZAK, 12 mm lead, A=1/B=1.
+
+vendor_id: 0x000002BE
+product_id: 0x000013AF
+# AZD3A ESI DC Sync0 setting. CSP must not run in Free Run mode.
+assign_activate: 0x0300
+auto_fault_reset: false
+
+rpdo:
+  - index: 0x1600
+    channels:
+      - {index: 0x6040, sub_index: 0, type: uint16, default: 0}
+      # Provisional machine coordinate: captured lower end (raw 1999) = 0 m;
+      # positive ROS motion is upward and therefore decreasing raw counts.
+      - {index: 0x607a, sub_index: 0, type: int32, command_interface: position, factor: -833333.3333333334, offset: 1999.0, default: .nan}
+      - {index: 0x6060, sub_index: 0, type: int8, default: 8}
+
+tpdo:
+  - index: 0x1a00
+    channels:
+      - {index: 0x6041, sub_index: 0, type: uint16}
+      # Raw 1999 = 0 m; decreasing counts become positive upward travel.
+      - {index: 0x6064, sub_index: 0, type: int32, state_interface: position, factor: -0.0000012, offset: 0.0023988}
+      - {index: 0x6061, sub_index: 0, type: int8}

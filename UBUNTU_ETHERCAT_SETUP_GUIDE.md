@@ -225,13 +225,39 @@ ip link
 
 Choose the dedicated wired interface. Example for this PC: `eno2`.
 
-Edit `/etc/sysconfig/ethercat`:
+`/etc/sysconfig/ethercat` is an absolute system path on the Ubuntu PC, not a
+folder in this repository or the ROS workspace. If `/etc/sysconfig` or its
+`ethercat` file is missing, create the directory and open the file as follows
+(after completing the IgH installation in section 5):
+
+```bash
+sudo mkdir -p /etc/sysconfig
+sudo nano /etc/sysconfig/ethercat
+```
+
+Put these settings in the file, replacing `eno2` with this PC's dedicated
+EtherCAT interface. If the file already contains these settings, edit the
+existing lines instead of adding duplicates:
 
 ```bash
 MASTER0_DEVICE="eno2"
 DEVICE_MODULES="generic"
 UPDOWN_INTERFACES="eno2"
 ```
+
+In nano, save with `Ctrl+O`, press Enter, then exit with `Ctrl+X`. These are
+configuration-file contents; entering them at a terminal prompt does not save
+them to the file. Confirm the saved file:
+
+```bash
+sudo cat /etc/sysconfig/ethercat
+ls -l /etc/init.d/ethercat /opt/etherlab/bin/ethercat
+```
+
+If the service script or executable is also missing, return to section 5 and
+check that `sudo make install modules_install` completed successfully with
+`--prefix=/opt/etherlab --sysconfdir=/etc`. Creating the configuration file
+alone does not install the EtherCAT master.
 
 Interface names and MAC addresses can differ on every PC. Never blindly copy
 `eno2` or `02:00:00:00:00:01` to a new machine.

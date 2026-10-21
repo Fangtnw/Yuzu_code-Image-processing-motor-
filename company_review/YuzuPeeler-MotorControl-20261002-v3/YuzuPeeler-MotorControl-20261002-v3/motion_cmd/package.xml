@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>motor_controller</name>
+  <version>0.1.0</version>
+  <description>Guarded ROS 2 control, EtherCAT mappings, and operator GUI for the six-motor Yuzu peeler.</description>
+  <maintainer email="maintainer@example.invalid">Yuzu Peeler Team</maintainer>
+  <license>MIT</license>
+
+  <depend>rclpy</depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>control_msgs</depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>controller_manager</exec_depend>
+  <exec_depend>ethercat_driver</exec_depend>
+  <exec_depend>ethercat_generic_cia402_drive</exec_depend>
+  <exec_depend>velocity_controllers</exec_depend>
+  <exec_depend>joint_state_broadcaster</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>position_controllers</exec_depend>
+  <exec_depend>forward_command_controller</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+  <exec_depend>xacro</exec_depend>
+  <exec_depend>python3-tk</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

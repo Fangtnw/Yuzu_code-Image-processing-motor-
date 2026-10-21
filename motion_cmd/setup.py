@@ -22,6 +22,8 @@ setup(
     license="MIT",
     entry_points={
         "console_scripts": [
+            f"yuzu_contour_preview = {package_name}.yuzu_contour_preview:main",
+            f"yuzu_mock_contour = {package_name}.yuzu_mock_contour:main",
             f"azd3a_basic_test           = {package_name}.azd3a_basic_test_node:main",
             f"azd3a_ethercat_check       = {package_name}.azd3a_ethercat_check:main",
             f"azd3a_axis1_video_demo     = {package_name}.azd3a_axis1_video_demo:main",

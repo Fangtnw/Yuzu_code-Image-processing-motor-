@@ -1,0 +1,21 @@
+# AZD3A #2 (slave 1), Axis 2 / Motor 5 in CSP mode.
+# AZM46AK-FC20DA: 20:1, A=1/B=1, 200,000 counts/output revolution.
+vendor_id: 0x000002BE
+product_id: 0x000013AF
+assign_activate: 0x0300
+auto_fault_reset: false
+
+rpdo:
+  - index: 0x1610
+    channels:
+      - {index: 0x6840, sub_index: 0, type: uint16, default: 0}
+      - {index: 0x687a, sub_index: 0, type: int32, command_interface: position, factor: 31830.98861837907, default: .nan}
+      - {index: 0x6860, sub_index: 0, type: int8, default: 8}
+
+tpdo:
+  - index: 0x1a11
+    channels:
+      - {index: 0x6841, sub_index: 0, type: uint16}
+      - {index: 0x6864, sub_index: 0, type: int32, state_interface: position, factor: 0.00003141592653589793}
+      - {index: 0x686c, sub_index: 0, type: int32, state_interface: velocity, factor: 0.00003141592653589793}
+      - {index: 0x6861, sub_index: 0, type: int8}
