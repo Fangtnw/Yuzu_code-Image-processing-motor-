@@ -15,6 +15,7 @@ from sensor_msgs.msg import JointState
 from std_msgs.msg import Empty, Float64, Float64MultiArray, String
 
 from motor_controller.conveyor_index import NOMINAL_PITCH_MM, TRANSMISSION_RATIO, TRAVEL_CALIBRATION, OPERATING_MAX_RPM, OPERATING_SPEED_MM_S
+from motor_controller.motor5_gui_steps import stepped_motor5_target
 
 
 MOTOR1_TOPIC = "/yuzu/motor1/target_position_mm"
@@ -964,21 +965,26 @@ class YuzuOperatorGui:
                 if not math.isfinite(step_deg) or step_deg <= 0.0 or step_deg > MOTOR5_MAX_ANGLE_DEG:
                     raise ValueError
             except ValueError:
-                messagebox.showerror("Invalid Motor 5 step", "Enter a step between 0 and 90 degrees.")
+                messagebox.showerror("Invalid Motor 5 step", "Enter a step greater than 0 and at most 180 degrees.")
                 return
             self.node.publish_motor5_manual_step(direction * step_deg)
             self.status_text.set(
                 f"Motor 5 manual jog sent: {direction * step_deg:+.1f}° · stop before setting zero"
             )
             return
-        self.step_target(
-            self.motor5_entry,
-            self.motor5_step_entry,
-            direction,
-            0.0,
-            MOTOR5_MAX_ANGLE_DEG,
-            self.move_motor5,
-        )
+        try:
+            target = stepped_motor5_target(
+                float(self.motor5_entry.get()), self.motor5_direction.get(),
+                float(self.motor5_step_entry.get()), direction, MOTOR5_MAX_ANGLE_DEG,
+            )
+        except ValueError as error:
+            messagebox.showerror("Invalid Motor 5 step", str(error))
+            return
+        self.motor5_entry.delete(0, tk.END)
+        self.motor5_entry.insert(0, f"{abs(target):.4f}")
+        if target != 0.0:
+            self.motor5_direction.set(1 if target > 0.0 else -1)
+        self.move_motor5()
 
     def move_axis1(self) -> None:
         if self.node.motor1_publisher.get_subscription_count() == 0:
@@ -1090,7 +1096,7 @@ class YuzuOperatorGui:
         try:
             angle_deg = float(self.motor5_entry.get())
             if not math.isfinite(angle_deg) or not 0.0 <= angle_deg <= MOTOR5_MAX_ANGLE_DEG:
-                raise ValueError("Motor 5 angle must be 0..90 degrees")
+                raise ValueError("Motor 5 angle must be 0..180 degrees")
         except ValueError as error:
             messagebox.showerror("Invalid Motor 5 command", str(error))
             return

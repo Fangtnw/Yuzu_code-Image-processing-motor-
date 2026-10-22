@@ -47,6 +47,10 @@ protocol are specified in `MOTOR_ROS2_INTERFACE.md`.
   the mechanical fixture must define any wider safe range. Before zero capture, the `<`/`>`
   step buttons provide guarded manual jogging; stop the mechanism, then press
   **Set current position as zero** before using typed angle or return commands.
+  After zero capture, `<` and `>` step the signed target through zero across
+  the full -180°..+180° range. The CW/CCW selection follows the target sign;
+  the angle entry remains a nonnegative magnitude. The buttons step from the
+  displayed target, so monitor live feedback before issuing another move.
 - The combined launch owns each AZD3A slave once and operates Motors 1, 2, and
   3 through separate guarded interfaces on slave 0. Slave 1 similarly combines
   Motor 4 Axis 1 position and Motor 6 Axis 3 cyclic synchronous position interfaces.
