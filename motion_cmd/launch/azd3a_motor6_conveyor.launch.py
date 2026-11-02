@@ -1,4 +1,4 @@
-"""Launch the guarded 48 rpm Motor 6 conveyor test."""
+"""Launch the guarded Motor 6 conveyor test (60 rpm output limit)."""
 
 from pathlib import Path
 
@@ -35,7 +35,7 @@ def generate_launch_description() -> LaunchDescription:
             Node(package="controller_manager", executable="spawner", arguments=["joint_state_broadcaster", "-c", "/controller_manager"], output="screen"),
             Node(package="controller_manager", executable="spawner", arguments=["motor6_raw_position_controller", "-c", "/controller_manager"], output="screen"),
             Node(package="motor_controller", executable="azd3a_motor6_conveyor_guard",
-                 parameters=[{"feedback_joint": "motor6_joint", "position_interface": "position"}],
+                 parameters=[{"feedback_joint": "motor6_joint", "position_interface": "position", "velocity_interface": "velocity"}],
                  output="screen"),
             Node(package="robot_state_publisher", executable="robot_state_publisher", parameters=[robot_description], output="screen"),
             RegisterEventHandler(OnProcessExit(target_action=control_node, on_exit=[EmitEvent(event=Shutdown(reason="ros2_control_node exited"))])),

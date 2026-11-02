@@ -18,7 +18,7 @@ TRAVEL_CALIBRATION = (1.4 * 142.0 / 140.0) / TRANSMISSION_RATIO
 ROLLER_DIAMETER_MM = 30.0
 MM_PER_COUNT = math.pi * ROLLER_DIAMETER_MM * TRANSMISSION_RATIO * TRAVEL_CALIBRATION / COUNTS_PER_TURN
 MM_S_PER_RPM = math.pi * ROLLER_DIAMETER_MM * TRANSMISSION_RATIO * TRAVEL_CALIBRATION / 60.0
-OPERATING_SPEED_MM_S = 90.0
+OPERATING_SPEED_MM_S = 60.0 * MM_S_PER_RPM
 OPERATING_MAX_RPM = OPERATING_SPEED_MM_S / MM_S_PER_RPM
 FIXTURE_COUNT = 12
 NOMINAL_PITCH_MM = 140.0
@@ -29,13 +29,13 @@ STOP_SPEED_MM_S = 0.02
 
 
 class ConveyorIndex:
-    def __init__(self, max_rpm=OPERATING_MAX_RPM, max_ramp=96.0, command_timeout=0.5,
+    def __init__(self, max_rpm=OPERATING_MAX_RPM, max_ramp=120.0, command_timeout=0.5,
                  loop_counts=NOMINAL_LOOP_MM / MM_PER_COUNT, tolerance_mm=0.02):
         values = (max_rpm, max_ramp, command_timeout, loop_counts, tolerance_mm)
         if not all(math.isfinite(v) and v > 0.0 for v in values):
             raise ValueError("Conveyor configuration must be finite and positive")
         if max_rpm > OPERATING_MAX_RPM + 1e-9 or max_ramp < max_rpm / 0.5:
-            raise ValueError("Conveyor cap is 90 mm/s; ramp must support a 0.5 s stop")
+            raise ValueError("Conveyor cap is 60 output rpm; ramp must support a 0.5 s stop")
         if command_timeout <= 0.005 or command_timeout > 0.5:
             raise ValueError("Conveyor watchdog must be within (0.005, 0.5] s")
         if not 1.0 <= loop_counts * MM_PER_COUNT / FIXTURE_COUNT <= 1000.0:

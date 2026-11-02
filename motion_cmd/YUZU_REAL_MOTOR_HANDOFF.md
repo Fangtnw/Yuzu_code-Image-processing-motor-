@@ -1,3 +1,5 @@
+> Current integrated physical port wiring: [AXIS_WIRING.md](AXIS_WIRING.md). Motor numbers in this document identify machine roles.
+
 # Yuzu diameter reference and fixed motor sequence
 
 Updated 2026-10-22 for the corrected machine concept. The camera measures the
@@ -66,7 +68,7 @@ topics are:
 
 | Topic | Type | Units/range |
 |---|---|---|
-| `/yuzu/motor2/target_velocity_rpm` | `Float64` | signed rpm, ±332.8 |
+| `/yuzu/motor2/target_velocity_rpm` | `Float64` | signed rpm, ±416 |
 | `/yuzu/motor3/target_position_mm` | `Float64` | absolute mm, 0..20 |
 | `/yuzu/motor4/target_position_mm` | `Float64` | absolute mm, 0..20 |
 | `/yuzu/motor5/target_position_deg` | `Float64` | runtime-relative degrees, ±180 |

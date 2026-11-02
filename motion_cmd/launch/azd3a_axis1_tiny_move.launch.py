@@ -51,14 +51,13 @@ def generate_launch_description() -> LaunchDescription:
         executable="azd3a_motor1_position_guard",
         parameters=[
             {
-                # Provisional machine coordinates: the captured lower end is
-                # zero and positive ROS motion is upward. Keep the first
-                # assembled-machine envelope to half the actuator stroke.
-                # Never command the captured mechanical-end coordinate itself.
+                # Provisional machine coordinates: raw 2001 at the top is
+                # zero and positive ROS motion is downward. Confirm the
+                # assembled travel before expanding a commissioning move.
                 "min_position_m": 0.0,
                 "max_position_m": 0.400,
-                "max_velocity_m_s": 0.480,
-                "max_acceleration_m_s2": 0.480,
+                "max_velocity_m_s": 0.600,
+                "max_acceleration_m_s2": 0.600,
             }
         ],
         output="screen",

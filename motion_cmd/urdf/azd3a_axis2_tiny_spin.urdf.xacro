@@ -7,7 +7,7 @@
     <parent link="axis2_base"/>
     <child link="axis2_output"/>
     <axis xyz="0 0 1"/>
-    <!-- 80% of the official 416 rpm output maximum: 332.8 rpm. -->
+    <!-- Published Motor 2 output maximum: 416 rpm. -->
     <limit velocity="43.563418" effort="0.7"/>
   </joint>
 
@@ -20,10 +20,10 @@
     </hardware>
 
     <joint name="axis2_joint">
-      <!-- +/-34.85073450 rad/s = +/-332.8 rpm (80% operating ceiling). -->
+      <!-- +/-43.56341813 rad/s = +/-416 rpm (100% output ceiling). -->
       <command_interface name="velocity">
-        <param name="min">-34.85073450382277</param>
-        <param name="max">34.85073450382277</param>
+        <param name="min">-43.56341813</param>
+        <param name="max">43.56341813</param>
       </command_interface>
       <state_interface name="position"/>
       <state_interface name="velocity"/>

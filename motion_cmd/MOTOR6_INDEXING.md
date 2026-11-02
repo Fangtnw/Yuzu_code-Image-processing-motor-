@@ -1,4 +1,10 @@
+> Current integrated physical port wiring: [AXIS_WIRING.md](AXIS_WIRING.md). Motor numbers in this document identify machine roles.
+
 # Motor 6 fixture indexing investigation — 2026-10-07
+
+Current speed cap (2026-10-22): 60 output rpm, about 133.83 mm/s at the
+calibrated conversion, with a 120 rpm/s software ramp. The 90 mm/s values
+below document the earlier indexing trial and calibration.
 
 ## Current trial calibration
 

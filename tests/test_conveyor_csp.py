@@ -12,7 +12,7 @@ class CspTests(unittest.TestCase):
         self.assertAlmostEqual(TRANSMISSION_RATIO, 25 / 18)
         self.assertAlmostEqual(TRAVEL_CALIBRATION, 1.0224)
         self.assertAlmostEqual(1 / MM_PER_COUNT, 3736.031527978765)
-        self.assertAlmostEqual(OPERATING_MAX_RPM, 40.34914050217066)
+        self.assertAlmostEqual(OPERATING_MAX_RPM, 60.0)
 
     def test_velocity_noise_with_stationary_encoder(self):
         motion = ConveyorIndex()
@@ -33,9 +33,9 @@ class CspTests(unittest.TestCase):
             motion.feedback(origin, 0, True, i * .005)
         motion.capture_reference(.2)
         if jog:
-            motion.jog(35.995, OPERATING_MAX_RPM, 96, 96, .2)
+            motion.jog(35.995, OPERATING_MAX_RPM, 120, 120, .2)
         else:
-            motion.request_index(1, OPERATING_MAX_RPM, 96, 96, .2)
+            motion.request_index(1, OPERATING_MAX_RPM, 120, 120, .2)
         for i in range(1, 1601):
             now = .2 + i * .005
             motion.heartbeat(now)

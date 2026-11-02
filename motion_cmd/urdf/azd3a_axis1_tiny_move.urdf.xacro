@@ -13,7 +13,7 @@
     <child link="axis1_table"/>
     <axis xyz="1 0 0"/>
     <!-- EZSM3LD040AZAK envelope; the runtime commissioning guard is tighter. -->
-    <limit lower="0.000" upper="0.400" velocity="0.600" effort="43.0"/>
+    <limit lower="-0.00001" upper="0.400" velocity="0.600" effort="43.0"/>
   </joint>
 
   <ros2_control name="AZD3A_axis1_tiny_move" type="system">
@@ -27,8 +27,8 @@
 
     <joint name="axis1_joint">
       <command_interface name="position">
-        <!-- Keep 0.0996 mm clearance from provisional lower-end zero. -->
-        <param name="min">0.0000996</param>
+        <!-- Zero is the provisional top home; positive position is downward. -->
+        <param name="min">-0.00001</param>
         <param name="max">0.400</param>
       </command_interface>
       <state_interface name="position"/>

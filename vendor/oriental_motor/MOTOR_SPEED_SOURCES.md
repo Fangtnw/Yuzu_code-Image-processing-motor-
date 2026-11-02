@@ -1,5 +1,11 @@
 # Installed motor speed ratings and project caps
 
+Current software caps (2026-10-22): Motor 1 600 mm/s; Motor 2 416 rpm;
+Motors 3/4 40 mm/s; Motor 5 150 rpm; Motor 6 60 output rpm. The 80% caps
+tabulated below record the previous configuration. Current software ramps
+are 600 mm/s², 832 rpm/s, 80 mm/s², 80 mm/s², 300 rpm/s, and 120 rpm/s,
+respectively; these are not catalog acceleration ratings.
+
 Checked against Oriental Motor's official model-specific catalog pages on
 2026-10-01. These links are the source of record for the published speed
 ratings below; use the model number on the hardware label when opening them.

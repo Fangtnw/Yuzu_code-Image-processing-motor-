@@ -140,6 +140,10 @@ sha256sum -c SHA256SUMS
 
 ## Current integrated axes
 
+Physical port wiring differs from logical motor numbers. See
+[`motion_cmd/AXIS_WIRING.md`](motion_cmd/AXIS_WIRING.md) before rebuilding or
+commissioning after a harness change.
+
 The preferred public command topics use `/yuzu/motor1` through
 `/yuzu/motor6`, with units in the target topic names. Earlier `motor*` and
 `axis1`/`axis2` command topics remain available for existing commissioning
@@ -148,20 +152,20 @@ scripts. New integrations should use the `/yuzu/motor*` contract in
 
 | Motor | Function | GUI command units | Project operating limit |
 |---|---|---|---|
-| 1 | vertical Yuzu placement | mm | 0–400 mm, 480 mm/s (80% of 600 mm/s actuator maximum) |
+| 1 | vertical Yuzu placement | mm downward from provisional top home | 0–400 mm, 600 mm/s actuator maximum; physical travel and speed validation pending |
 | 2 | Yuzu rotation | rpm | ±332.8 rpm (80% of 416 rpm output maximum) |
 | 3 | gripping/feed slide | mm | 0–20 mm, 32 mm/s (80% of 40 mm/s actuator maximum) |
 | 4 | peeling-depth slide | mm | 0–20 mm, 32 mm/s (80% of 40 mm/s actuator maximum) |
 | 5 | peeler index | degrees from runtime zero | ±180°, 120 rpm (80% of 150 rpm output maximum) |
 | 6 | conveyor | mm/s and indexed distance steps | 90 mm/s (about 40.35 rpm), 140 mm per step |
 
-Motor 1 ramps to/from its 480 mm/s cap in 1 s using 480 mm/s². Motors 2–6 use
+Motor 1 ramps to/from its 600 mm/s cap in 1 s using 600 mm/s². Motors 2–6 use
 0.5 s profiles: Motor 2 665.6 rpm/s; Motors 3/4 64 mm/s²; Motor 5 240 rpm/s;
 Motor 6 96 rpm/s. Motors 3/4 remain below their published 200 mm/s²
 acceleration maximum. These are software profiles; Motor 1's ramp must be
 validated on the loaded vertical assembly. Short position moves can brake
-before attaining the speed cap. A Motor 1 rest-to-rest move needs about 480 mm
-to accelerate to 480 mm/s and brake at this ramp, so the guarded 400 mm stroke
+before attaining the speed cap. A Motor 1 rest-to-rest move needs about 600 mm
+to accelerate to 600 mm/s and brake at this ramp, so the guarded 400 mm stroke
 cannot reach that cap and stop in-range from rest. The manufacturer source register is
 `vendor/oriental_motor/MOTOR_SPEED_SOURCES.md`.
 

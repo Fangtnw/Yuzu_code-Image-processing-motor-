@@ -1,5 +1,14 @@
 # AZD3A-KED Connected Hardware
 
+**Current integrated wiring:** see [`AXIS_WIRING.md`](AXIS_WIRING.md). The
+port assignments below are dated commissioning history and include earlier
+harness configurations.
+
+
+Current software speed caps (2026-10-22): M1 600 mm/s, M2 416 rpm,
+M3/M4 40 mm/s, M5 150 rpm, M6 60 output rpm (about 133.83 mm/s calibrated
+belt speed). The dated 80% tables below describe the earlier configuration.
+
 This records the physical devices connected during the one-drive bring-up.
 Model strings should be checked against the physical labels before scaling or
 motion limits are treated as final.
@@ -128,7 +137,7 @@ setting or a software safety limit.
 | Drive pulley diameter | 30 mm | Official MISUMI SVKA catalog and calculation table |
 | Live electronic gearing | A=1, B=1 | SDO `0x7091:01/02` read from slave 1 Axis 3 |
 | Live software conversion | 500,000 drive counts/output revolution | Verified commissioning configuration; not the catalog's selectable pulse-resolution figure |
-| Current GUI speed cap | 48 output rpm / 75.40 mm/s belt speed | 80% of the 60 rpm permissible hardware maximum |
+| Current GUI speed cap | 60 output rpm / about 133.83 mm/s calibrated belt speed | 100% of the 60 rpm permissible output maximum |
 
 The conversions used by the Motor 6 ROS configuration are:
 
@@ -163,7 +172,7 @@ actuator or geared motor's published maximum:
 | Motor | Published maximum | 80% operating speed | Acceleration/deceleration setting |
 | --- | ---: | ---: | --- |
 | 1 | 600 mm/s | 480 mm/s | 480 mm/s² software ramp (1 s) |
-| 2 | 416 rpm output | 332.8 rpm | 665.6 rpm/s software ramp |
+| 2 | 416 rpm output | 416 rpm | 832 rpm/s software ramp |
 | 3 | 40 mm/s | 32 mm/s | 64 mm/s² (below 200 mm/s² actuator maximum) |
 | 4 | 40 mm/s | 32 mm/s | 64 mm/s² (below 200 mm/s² actuator maximum) |
 | 5 | 150 rpm output | 120 rpm | 240 rpm/s software ramp |
@@ -274,6 +283,24 @@ as an additional confirmed requirement pending a revised sequence drawing.
 
 ## Axis 1: Motor 1 linear slide
 
+Current software coordinate (2026-10-27): the operator identified the physical
+top as the desired Motor 1 home. At that stationary top position, EtherCAT SDO
+`0x6064` read 2,001 counts, `0x607C` read zero, and `0x6091:01/02` read 1/1.
+The combined and standalone ROS mappings therefore use raw 2,001 as a
+**provisional top zero** and positive millimetres downward:
+
+```text
+raw target = 2001 + 833333.3333333334 * position_m
+ROS position_m = 0.0000012 * raw - 0.0024012
+```
+
+The earlier lower-end raw-1,999 zero and positive-up convention described
+below are historical commissioning settings. The new reference has not been
+validated by a powered downward move or by measuring the assembled stroke.
+Keep the mechanism clear and first verify a small positive target increases
+raw counts and physically moves downward. The 0..400 mm software range is the
+actuator catalog stroke, not a verified assembled-machine travel envelope.
+
 Current hardware is an `AZM46AK` motor with a label stating that its parameters
 are set for `EZSM3LD040AZAK`. The actuator has a 12 mm lead, 400 mm stroke,
 600 mm/s catalog maximum speed, and no electromagnetic brake. The assembled
@@ -324,7 +351,7 @@ upward travel was 827 counts = 0.9924 mm. Axis 1 alarm `0x603F` remained
 move on the assembled Motor 1 mechanism; it does not yet define a machine home
 or authorize downward travel into the lower stop.
 
-For the next commissioning stage, the 1,999-count lower-end capture is used as
+At the earlier commissioning stage, the 1,999-count lower-end capture was used as
 a provisional software zero without writing the drive's home offset. ROS Motor
 1 coordinates are now positive upward:
 

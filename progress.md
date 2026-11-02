@@ -1,6 +1,19 @@
 # EtherCAT Bring-up Progress
 
-Last updated: 2026-10-07
+Last updated: 2026-10-27
+
+## 2026-10-27 — Motor 1 provisional top-home coordinate
+
+The operator identified the physical top as the desired Motor 1 home. With
+Motor 1 stationary and enabled, slave 0 Axis 1 read raw `0x6064=2001`, home
+offset `0x607C=0`, and electronic gear A/B `0x6091:01/02=1/1`. The ROS GUI
+then showed -0.002 mm, consistent with the earlier raw-1999 lower-end zero.
+MEXE02 was used for data reading only. The source now uses raw 2,001 as a
+provisional top zero, with positive ROS millimetres downward; the operation
+sequence's Motor 1 return default is 0 mm. Offline configuration checks pass.
+No powered downward motion or full-stroke validation has been performed for
+this new coordinate. The previous raw-1,999 lower-end reference and
+positive-upward commissioning record below remain historical evidence.
 
 ## Goal
 

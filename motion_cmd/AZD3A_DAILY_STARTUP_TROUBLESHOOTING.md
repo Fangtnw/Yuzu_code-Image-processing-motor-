@@ -1,5 +1,9 @@
 # AZD3A Daily Startup and Troubleshooting
 
+Current software caps (2026-10-22): M1 600 mm/s, M2 416 rpm, M3/M4 40 mm/s,
+M5 150 rpm, and M6 60 output rpm. Dated 80% values later in this document
+describe earlier commissioning settings.
+
 Use this file after reboot and whenever EtherCAT or an AZD3A axis does not
 start normally. Commands assume Ubuntu 22.04, IgH EtherCAT at `/opt/etherlab`,
 dedicated EtherCAT NIC, and ROS 2 Humble workspace `~/yuzu_ws`.
@@ -66,8 +70,8 @@ Axis 2 guarded RPM control:
 ros2 launch motor_controller azd3a_axis2_tiny_spin.launch.py
 ```
 
-The Motor 2 operating ceiling is 332.8 rpm (80% of its 416 rpm output maximum)
-with 665.6 rpm/s acceleration/deceleration (0.5 s to/from the cap). The standalone launch uses the same
+The Motor 2 operating ceiling is 416 rpm (100% of its published output maximum)
+with 832 rpm/s acceleration/deceleration (0.5 s to/from the cap). The standalone launch uses the same
 defaults. For maintenance or staged recommissioning, set lower ceilings
 explicitly and increase in measured steps.
 
@@ -90,8 +94,9 @@ For normal combined Motor 1/2/3/4/6 GUI operation:
 ros2 launch motor_controller yuzu_peeler.launch.py
 ```
 
-This starts all integrated machine axes: Motors 1, 2, and 3 on slave 0, plus
-Motors 4, 5, and 6 on slave 1. The expected active controllers are:
+This starts all integrated machine axes: Motors 1, 2, and 6 on slave 0, plus
+Motors 4, 3, and 5 on slave 1. Confirm this controller order on the live
+EtherCAT chain before enabling motion; see `AXIS_WIRING.md`. The expected active controllers are:
 
 ```text
 joint_state_broadcaster
@@ -200,12 +205,12 @@ Stop the ROS launch first. Axis-specific CiA 402 objects are:
 /opt/etherlab/bin/ethercat upload -p 0 --type uint16 0x7041 0
 /opt/etherlab/bin/ethercat upload -p 0 --type int32  0x7064 0
 
-# Motor 6: AZD3A #2 (slave 1), local Axis 3
-/opt/etherlab/bin/ethercat upload -p 1 --type uint16 0x4040 3
-/opt/etherlab/bin/ethercat upload -p 1 --type uint16 0x703F 0
-/opt/etherlab/bin/ethercat upload -p 1 --type uint16 0x7041 0
-/opt/etherlab/bin/ethercat upload -p 1 --type int32  0x7064 0
-/opt/etherlab/bin/ethercat upload -p 1 --type int32  0x706C 0
+# Motor 6: physical Axis 3, slave position 0
+/opt/etherlab/bin/ethercat upload -p 0 --type uint16 0x4040 3
+/opt/etherlab/bin/ethercat upload -p 0 --type uint16 0x703F 0
+/opt/etherlab/bin/ethercat upload -p 0 --type uint16 0x7041 0
+/opt/etherlab/bin/ethercat upload -p 0 --type int32  0x7064 0
+/opt/etherlab/bin/ethercat upload -p 0 --type int32  0x706C 0
 ```
 
 An error code of `0x0000` means no drive alarm. Statusword `0x0270` (`624`)

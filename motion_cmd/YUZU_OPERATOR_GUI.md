@@ -1,3 +1,5 @@
+> Current integrated physical port wiring: [AXIS_WIRING.md](AXIS_WIRING.md). Motor numbers in this document identify machine roles.
+
 # Yuzu Peeler Operator GUI
 
 The operator panel controls guarded public interfaces for all six machine
@@ -14,34 +16,39 @@ protocol are specified in `MOTOR_ROS2_INTERFACE.md`.
 - The on-screen rotary stop sends controlled zero-speed commands to Motors 2
   and 6. It is not an emergency stop; keep the physical power cutoff
   accessible.
-- Motor 1's backend and GUI range is 0..400 mm. Its 480 mm/s speed cap is 80%
-  of the actuator's 600 mm/s published maximum; its symmetric 480 mm/s²
+- Motor 1's backend and GUI range is 0..400 mm. Its 600 mm/s speed cap matches
+  the actuator's published maximum; its symmetric 600 mm/s²
   acceleration/deceleration ramps reach or stop from that cap in 1 s on a long
   enough move. The catalog page does not give a maximum acceleration rating.
   The operator has validated 100 mm/s physically, so the cap and new ramp need
   staged validation on the loaded assembly. A rest-to-rest move at the full
-  480 mm/s cap needs about 480 mm to accelerate and brake, so it cannot reach
+  600 mm/s cap needs about 600 mm to accelerate and brake, so it cannot reach
   that cap and stop within the guarded 400 mm stroke.
-- Motor 2 is capped at 332.8 rpm, 80% of its 416 rpm published output maximum.
-  The default acceleration/deceleration is 665.6 rpm/s, reaching the cap in
+- Motor 1 now uses a provisional top home: 0 mm is raw encoder count 2,001,
+  and positive targets move downward. This direction and the assembled travel
+  need a small supervised physical validation before full-range operation.
+- Motor 2 is capped at 416 rpm, its published output maximum. The editable
+  speed field defaults to 374.4 rpm (90%); enter 416 rpm for 100%.
+  The default acceleration/deceleration is 832 rpm/s, reaching the cap in
   0.5 s. Acc/dec entries remain adjustable, but guards reject values too low
   for the requested speed or above the configured ceiling; these are software
   ramps, not manufacturer ratings.
 - Motors 3 and 4 are guarded to 0..20 mm (the DR28 catalog stroke is 30 mm) in
   0.0001 mm hardware-count steps. Both use the
-  32 mm/s velocity and symmetric 64 mm/s^2 ramps, reaching the cap in 0.5 s.
+  40 mm/s velocity and symmetric 80 mm/s^2 ramps, reaching the cap in 0.5 s.
   The acceleration is below the DR28's published 200 mm/s² maximum. Motor 3 uses
-  the custom `motor3_position` interface on slave 0 Axis 3.
-- Motor 6 indexes 140 mm per step and is limited to 90 mm/s belt speed
-  (about 40.35 rpm at the calibrated conversion). The GUI defaults to that
-  speed and a 96 rpm/s software ramp, reaching the cap within 0.5 s;
+  the custom `motor3_position` interface on slave 1 local Axis 2
+  (physical Axis 5).
+- Motor 6 indexes 140 mm per step and is limited to 60 output rpm, about
+  133.83 mm/s at the calibrated conversion. The GUI defaults to that
+  speed and a 120 rpm/s software ramp, reaching the cap within 0.5 s;
   acc/dec entries are constrained to satisfy that time.
   The 0.5-second watchdog remains, refreshed by index heartbeats during a
   step or speed commands during manual running. Backend indexing requires
   position, velocity and enabled status together, no older than 0.1 s. Positive RPM
   is the physically verified forward conveyor direction.
 - Motor 5 uses a project limit of +/-180 degrees from an operator-defined runtime
-  origin at 120 rpm, 80% of its 150 rpm output maximum. Its 240 rpm/s ramp is a
+  origin at 150 rpm, its published output maximum. Its 300 rpm/s ramp is a
   software profile, reaching cap in 0.5 s when the move is long
   enough. The encoder/drive has no intrinsic angular travel stop, so
   the mechanical fixture must define any wider safe range. Before zero capture, the `<`/`>`
@@ -51,16 +58,16 @@ protocol are specified in `MOTOR_ROS2_INTERFACE.md`.
   the full -180°..+180° range. The CW/CCW selection follows the target sign;
   the angle entry remains a nonnegative magnitude. The buttons step from the
   displayed target, so monitor live feedback before issuing another move.
-- The combined launch owns each AZD3A slave once and operates Motors 1, 2, and
-  3 through separate guarded interfaces on slave 0. Slave 1 similarly combines
-  Motor 4 Axis 1 position and Motor 6 Axis 3 cyclic synchronous position interfaces.
+- The combined launch owns each AZD3A slave once. Slave 0 contains physical
+  Axes 1/2/3 (Motors 1/2/6); slave 1 contains physical Axes 4/5/6
+  (Motors 4/3/5).
 Commands may be issued step by step or concurrently when the machine sequence
 eventually requires it.
 
 The 0.5 s acceleration/deceleration time is the ramp to/from a requested speed,
 not a guarantee that every positioning move reaches that speed. Short moves
 must decelerate early. Motor 6's 140 mm step has sufficient distance to
-reach the current speed cap and brake with its 96 rpm/s ramp. Motors 2–5 are intended to
+reach the current speed cap and brake with its 120 rpm/s ramp. Motors 2–5 are intended to
 run simultaneously in part of the sequence; staged combined-load validation
 is required before using all their caps together. Exact official catalog
 sources and calculations are in `vendor/oriental_motor/MOTOR_SPEED_SOURCES.md`.
@@ -99,8 +106,8 @@ the GUI and mirror the guarded backend settings.
 
 Motor 1 entries are in millimetres. The GUI aligns them to the 0.0012 mm
 encoder count before publishing and uses a 1 mm default step. Motor 2 entries
-are in rpm (332.8 rpm default cap); its acceleration and deceleration fields
-default to 665.6 rpm/s and remain operator-adjustable within the guard. These
+are in rpm (416 rpm cap); its acceleration and deceleration fields
+default to 832 rpm/s and remain operator-adjustable within the guard. These
 are software profiles, not manufacturer acceleration ratings. While rotation is active, the GUI
 refreshes the command so the existing 0.5-second watchdog does
 not stop it. Motor 3 and Motor 4 entries are absolute millimetres from their ABZO
@@ -126,7 +133,7 @@ Motor 1/3/4 operation distances and Motor 2 speed are editable before running.
 Motor 6's distance is read-only and comes from the backend. Placement cannot
 advance until the requested conveyor index reports stopped completion. No
 fixture-mark confirmation or sensor workflow is included in this version.
-The default Motor 1 operation approach/home positions are 300 mm and 400 mm;
+The default Motor 1 operation approach/home positions are 300 mm and 0 mm;
 the complete step list remains visible with only the active step highlighted.
 The GUI unlocks motion only after all six mapped CiA-402 status words report
 Operation Enabled (`(statusword & 0x006F) == 0x0027`); otherwise the banner identifies the

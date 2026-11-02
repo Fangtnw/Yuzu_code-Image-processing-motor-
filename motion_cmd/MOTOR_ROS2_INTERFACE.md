@@ -1,3 +1,5 @@
+> Current integrated physical port wiring: [AXIS_WIRING.md](AXIS_WIRING.md). Motor numbers in this document identify machine roles.
+
 # ROS 2 interface for an external motor GUI
 
 This is the public interface of `yuzu_peeler.launch.py`. An external GUI can
@@ -17,8 +19,8 @@ indexing uses a repeated request and a status topic.
 
 | Motor | Topic | ROS 2 type | Payload and units |
 |---|---|---|---|
-| 1 | `/yuzu/motor1/target_position_mm` | `std_msgs/msg/Float64` | `data: absolute_position_mm`; 0–400 mm, aligned to 0.0012 mm |
-| 2 | `/yuzu/motor2/target_velocity_rpm` | `std_msgs/msg/Float64` | `data: signed_rpm`; ±332.8 rpm |
+| 1 | `/yuzu/motor1/target_position_mm` | `std_msgs/msg/Float64` | `data: absolute_position_mm`; 0–400 mm downward from provisional top home, aligned to 0.0012 mm |
+| 2 | `/yuzu/motor2/target_velocity_rpm` | `std_msgs/msg/Float64` | `data: signed_rpm`; ±416 rpm |
 | 3 | `/yuzu/motor3/target_position_mm` | `std_msgs/msg/Float64` | `data: absolute_position_mm`; 0–20 mm, 0.0001 mm increments |
 | 4 | `/yuzu/motor4/target_position_mm` | `std_msgs/msg/Float64` | `data: absolute_position_mm`; 0–20 mm, 0.0001 mm increments |
 | 5 | `/yuzu/motor5/target_position_deg` | `std_msgs/msg/Float64` | `data: signed_angle_deg` relative to the runtime zero; ±180° |
@@ -29,7 +31,7 @@ indexing uses a repeated request and a status topic.
 
 Motor 2 requires repeated commands while running: the guard's watchdog ramps
 to zero after 0.5 s without a new command. Publish at about 10 Hz. The
-default acceleration and deceleration are 665.6 rpm/s. To change that profile,
+default acceleration and deceleration are 832 rpm/s. To change that profile,
 publish `[rpm, acceleration_rpm_s, deceleration_rpm_s]` as
 `std_msgs/msg/Float64MultiArray` on the existing
 `/motor2_velocity_controller/commands_rpm` topic; then continue refreshing

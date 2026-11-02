@@ -27,7 +27,7 @@ EXTERNAL_STATUS_TOPIC = "/yuzu/motor6/index_status"
 EXTERNAL_STOP_TOPIC = "/yuzu/motor6/stop"
 HARD_MAX_RPM = 60.0
 COMMISSIONING_MAX_RPM = OPERATING_MAX_RPM
-DEFAULT_ACCELERATION_RPM_S = 96.0
+DEFAULT_ACCELERATION_RPM_S = 120.0
 COMMAND_TIMEOUT_S = 0.5
 UPDATE_PERIOD_S = 0.005
 
@@ -41,8 +41,9 @@ class Motor6ConveyorGuard(Node):
             "command_timeout_s": COMMAND_TIMEOUT_S,
             "index_loop_counts": NOMINAL_LOOP_MM / MM_PER_COUNT,
             "index_tolerance_mm": 0.02,
-            "feedback_joint": "motor4_joint",
+            "feedback_joint": "motor1_motor2",
             "position_interface": "motor6_position",
+            "velocity_interface": "motor6_velocity",
         }
         for name, value in defaults.items():
             self.declare_parameter(name, value)
@@ -56,6 +57,7 @@ class Motor6ConveyorGuard(Node):
         )
         self.feedback_joint = str(parameter("feedback_joint"))
         self.position_interface = str(parameter("position_interface"))
+        self.velocity_interface = str(parameter("velocity_interface"))
         self.session = uuid.uuid4().hex
         self.lease = None
         self.requests = OrderedDict()
@@ -88,7 +90,7 @@ class Motor6ConveyorGuard(Node):
             interfaces = message.interface_values[joint]
             values = dict(zip(interfaces.interface_names, interfaces.values))
             position = values[self.position_interface]
-            velocity = values["velocity"]
+            velocity = values[self.velocity_interface]
             status = values["motor6_status"]
             if not all(math.isfinite(v) for v in (position, velocity, status)):
                 raise ValueError("Non-finite feedback")

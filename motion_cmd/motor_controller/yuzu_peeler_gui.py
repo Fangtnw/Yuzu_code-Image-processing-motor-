@@ -35,25 +35,25 @@ AXIS1_MIN_MM = 0.0
 AXIS1_MAX_MM = 400.0
 AXIS1_INCREMENT_MM = 0.0012
 AXIS1_PARK_MM = 0.0
-AXIS1_VELOCITY_MM_S = 480.0  # 80% of the 600 mm/s actuator rating
-AXIS1_ACCELERATION_MM_S2 = 480.0  # reaches 480 mm/s in 1 s; validate on the loaded vertical assembly
-AXIS2_GUI_MAX_RPM = 332.8  # 80% of the 416 rpm output rating
-AXIS2_ACCELERATION_RPM_S = 665.6  # proportional software ramp; no catalog max
+AXIS1_VELOCITY_MM_S = 600.0
+AXIS1_ACCELERATION_MM_S2 = 600.0  # reaches 600 mm/s in 1 s
+AXIS2_GUI_MAX_RPM = 416.0  # 100% of the published Motor 2 output maximum
+AXIS2_ACCELERATION_RPM_S = 832.0  # reaches 416 rpm in 0.5 s
 MOTOR4_MIN_MM = 0.0
 MOTOR4_MAX_MM = 20.0
 MOTOR4_INCREMENT_MM = 0.0001
 MOTOR3_MIN_MM = 0.0
 MOTOR3_MAX_MM = 20.0
 MOTOR3_INCREMENT_MM = 0.0001
-MOTOR3_4_VELOCITY_MM_S = 32.0  # 80% of the DR28 maximum 40 mm/s
-MOTOR3_ACCELERATION_MM_S2 = 64.0  # reaches 32 mm/s in 0.5 s; DR28 max is 200 mm/s^2
-MOTOR4_ACCELERATION_MM_S2 = 64.0
+MOTOR3_4_VELOCITY_MM_S = 40.0
+MOTOR3_ACCELERATION_MM_S2 = 80.0  # reaches 40 mm/s in 0.5 s
+MOTOR4_ACCELERATION_MM_S2 = 80.0
 MOTOR5_MAX_ANGLE_DEG = 180.0
 MOTOR5_HARDWARE_STEP_DEG = 0.0018
-MOTOR5_VELOCITY_RPM = 120.0  # 80% of the FC20 output rating, 150 rpm
-MOTOR5_ACCELERATION_RPM_S = 240.0  # reaches 120 rpm in 0.5 s; software ramp, no catalog max
+MOTOR5_VELOCITY_RPM = 150.0
+MOTOR5_ACCELERATION_RPM_S = 300.0  # reaches 150 rpm in 0.5 s
 MOTOR6_GUI_MAX_RPM = OPERATING_MAX_RPM
-MOTOR6_ACCELERATION_RPM_S = 96.0  # reaches the current cap within 0.5 s; software ramp
+MOTOR6_ACCELERATION_RPM_S = 120.0  # reaches 60 rpm in 0.5 s
 MOTOR6_PULLEY_DIAMETER_MM = 30.0
 MOTOR6_GUI_MAX_MM_S = OPERATING_SPEED_MM_S
 FEEDBACK_STALE_S = 2.0
@@ -130,11 +130,11 @@ def checked_motor6_speed_mm_s(requested_mm_s: float) -> float:
     """Validate belt speed and convert it to gearbox-output RPM."""
     if not math.isfinite(requested_mm_s):
         raise ValueError("Motor 6 belt speed must be a finite number")
-    if not 0.0 <= requested_mm_s <= MOTOR6_GUI_MAX_MM_S:
+    if not 0.0 <= requested_mm_s <= MOTOR6_GUI_MAX_MM_S + 0.0005:
         raise ValueError(
             f"Motor 6 belt speed must be 0..{MOTOR6_GUI_MAX_MM_S:.2f} mm/s"
         )
-    return requested_mm_s * 60.0 / (math.pi * MOTOR6_PULLEY_DIAMETER_MM * TRANSMISSION_RATIO * TRAVEL_CALIBRATION)
+    return min(requested_mm_s, MOTOR6_GUI_MAX_MM_S) * 60.0 / (math.pi * MOTOR6_PULLEY_DIAMETER_MM * TRANSMISSION_RATIO * TRAVEL_CALIBRATION)
 
 
 class YuzuOperatorNode(Node):
@@ -228,9 +228,6 @@ class YuzuOperatorNode(Node):
             if index < len(message.position) and math.isfinite(message.position[index]):
                 self.motor4_position_m = message.position[index]
                 self._mark_feedback("motor4")
-            if index < len(message.velocity) and math.isfinite(message.velocity[index]):
-                self.motor6_velocity_rad_s = message.velocity[index]
-                self._mark_feedback("motor6")
         if "motor6_joint" in message.name:
             index = message.name.index("motor6_joint")
             if index < len(message.position) and math.isfinite(message.position[index]):
@@ -242,15 +239,16 @@ class YuzuOperatorNode(Node):
 
     def _dynamic_joint_state(self, message: DynamicJointState) -> None:
         channels = (
-            ("motor1_motor2", "motor3_position", "motor3_position_m", "motor3"),
+            ("motor4_joint", "motor3_position", "motor3_position_m", "motor3"),
             ("motor4_joint", "motor5_position", "motor5_position_rad", "motor5"),
-            ("motor4_joint", "motor6_position", "motor6_position_rad", "motor6"),
+            ("motor1_motor2", "motor6_velocity", "motor6_velocity_rad_s", "motor6"),
+            ("motor1_motor2", "motor6_position", "motor6_position_rad", "motor6"),
             ("motor1_motor2", "motor1_status", "drive_status[1]", "status1"),
             ("motor1_motor2", "motor2_status", "drive_status[2]", "status2"),
-            ("motor1_motor2", "motor3_status", "drive_status[3]", "status3"),
+            ("motor4_joint", "motor3_status", "drive_status[3]", "status3"),
             ("motor4_joint", "motor4_status", "drive_status[4]", "status4"),
             ("motor4_joint", "motor5_status", "drive_status[5]", "status5"),
-            ("motor4_joint", "motor6_status", "drive_status[6]", "status6"),
+            ("motor1_motor2", "motor6_status", "drive_status[6]", "status6"),
         )
         for joint_name, interface_name, attribute, motor in channels:
             try:
@@ -447,7 +445,7 @@ class YuzuOperatorGui:
     def _build_operation_tab(self, parent: ttk.Frame) -> None:
         ttk.Label(
             parent,
-            text="Peeling operation — execute one guarded stage at a time; verify motion before pressing Next step.",
+            text="Peeling operation — execute one guarded stage at a time; verify motion before pressing Next step. Motor 1 home is the top at 0 mm; larger positions move down.",
             style="Status.TLabel",
             wraplength=900,
         ).pack(anchor="w", pady=(0, 10))
@@ -460,8 +458,8 @@ class YuzuOperatorGui:
             ("Step 4.2 · Motor 4 feed-in position (mm)", "5.0"),
             ("Step 5 · Motor 3 gripping position (mm)", "2.0"),
             ("Step 5 · Motor 4 gripping position (mm)", "2.0"),
-            ("Step 4.1 · Motor 2 CCW speed (rpm)", "332.8"),
-            ("Step 6 · Motor 1 home position (mm)", "400.0"),
+            ("Step 4.1 · Motor 2 CCW speed (rpm)", "374.4"),
+            ("Step 6 · Motor 1 home position (mm)", "0.0"),
         )
         self.operation_entries = {}
         for row, (label, default) in enumerate(fields):
@@ -581,7 +579,7 @@ class YuzuOperatorGui:
     def _build_motor1(self, parent: ttk.Frame) -> None:
         frame = ttk.LabelFrame(parent, text="Motor 1 — Vertical position", padding=12)
         frame.grid(row=0, column=0, sticky="nsew", padx=4, pady=4)
-        ttk.Label(frame, text="Limits: 0–400 mm").pack(anchor="w")
+        ttk.Label(frame, text="Top home = 0 mm · larger targets lower the slider · range 0–400 mm").pack(anchor="w")
         ttk.Label(frame, text="Step size: 0.0012 mm hardware count · default 1 mm").pack(anchor="w")
         ttk.Label(
             frame,
@@ -610,7 +608,7 @@ class YuzuOperatorGui:
         self.axis1_move = ttk.Button(frame, text="Move Motor 1", command=self.move_axis1)
         self.axis1_move.pack(fill="x", pady=(12, 6))
         self.axis1_park = ttk.Button(
-            frame, text="Return to 0 mm", command=self.park_axis1
+            frame, text="Return to top (0 mm)", command=self.park_axis1
         )
         self.axis1_park.pack(fill="x")
 
@@ -618,7 +616,7 @@ class YuzuOperatorGui:
         frame = ttk.LabelFrame(parent, text="Motor 2 — Yuzu rotation", padding=12)
         frame.grid(row=1, column=0, sticky="nsew", padx=4, pady=4)
         ttk.Label(frame, text=f"Operating speed cap: {AXIS2_GUI_MAX_RPM:.1f} rpm").pack(anchor="w")
-        ttk.Label(frame, text="Acc/dec: 665.6 rpm/s at speed cap · 0.5 s ramp (adjustable, guarded)").pack(anchor="w")
+        ttk.Label(frame, text="Acc/dec: 832 rpm/s at speed cap · 0.5 s ramp (adjustable, guarded)").pack(anchor="w")
         self.axis2_feedback = tk.StringVar(value="Feedback: —")
         ttk.Label(frame, textvariable=self.axis2_feedback, style="Status.TLabel").pack(
             anchor="w", pady=(10, 12)
@@ -627,7 +625,7 @@ class YuzuOperatorGui:
         row.pack(fill="x")
         ttk.Label(row, text="Speed (rpm)").pack(side="left")
         self.axis2_entry = ttk.Entry(row, width=12)
-        self.axis2_entry.insert(0, "332.8")
+        self.axis2_entry.insert(0, "374.4")
         self.axis2_entry.pack(side="right")
         profile = ttk.Frame(frame)
         profile.pack(fill="x", pady=(4, 0))
@@ -696,8 +694,7 @@ class YuzuOperatorGui:
         row.pack(fill="x")
         ttk.Label(row, text="Belt speed (mm/s)").pack(side="left")
         self.motor6_entry = ttk.Entry(row, width=12)
-        # Keep the editable value at enough precision not to round above the
-        # exact 48 rpm-derived cap (75.398223... mm/s).
+        # The validator tolerates the 0.001 mm/s display rounding at the cap.
         self.motor6_entry.insert(0, f"{MOTOR6_GUI_MAX_MM_S:.3f}")
         self.motor6_entry.pack(side="right")
         distance_row = ttk.Frame(frame)
@@ -837,14 +834,14 @@ class YuzuOperatorGui:
             "Motor",
             "Travel / angle guard",
             "Hardware speed max",
-            "Operating cap (80%)",
+            "Operating cap (100%)",
             "Acceleration",
             "Deceleration",
         )
         rows = (
             (
                 "Motor 1",
-                f"{AXIS1_MIN_MM:.3f}–{AXIS1_MAX_MM:.0f} mm",
+                f"{AXIS1_MIN_MM:.3f}–{AXIS1_MAX_MM:.0f} mm down from top",
                 "600 mm/s",
                 f"{AXIS1_VELOCITY_MM_S:.0f} mm/s",
                 f"{AXIS1_ACCELERATION_MM_S2:.0f} mm/s²",
@@ -905,20 +902,19 @@ class YuzuOperatorGui:
             frame,
             text=(
                 "Motor 1 ramps to/from its operating cap in 1 s; Motors 2–6 use 0.5 s ramps. "
-                "Motor 3/4 use 64 mm/s² (below their 200 mm/s² rating); other values are software ramps, "
+                "Motor 3/4 use 80 mm/s² (below their 200 mm/s² rating); other values are software ramps, "
                 "not manufacturer acceleration ratings. Short moves may brake before reaching the cap. "
-                "Within Motor 1's 400 mm stroke, a rest-to-rest move cannot reach 480 mm/s and also stop."
+                "Within Motor 1's 400 mm stroke, a rest-to-rest move cannot reach 600 mm/s and also stop."
             ),
         ).grid(row=len(rows) + 1, column=0, columnspan=6, sticky="w", pady=(7, 0))
         ttk.Label(
             frame,
             text=(
                 "Manufacturer maxima: Motor 1 600 mm/s; Motors 3/4 40 mm/s; "
-                "Motors 2/5/6 416/150/60 rpm. GUI/guard speed caps are 80% of these maxima. "
+                "Motors 2/5/6 416/150/60 rpm. GUI/guard speed caps match these catalog maxima. "
                 "Linear Motors 3/4 retain 20 mm project travel guards (30 mm catalog stroke). "
-                f"Motor 6 belt speed at the 30 mm pulley is {MOTOR6_GUI_MAX_MM_S:.1f} mm/s at the "
-                f"48 rpm operating cap (hardware max: {60.0 * math.pi * MOTOR6_PULLEY_DIAMETER_MM / 60.0:.1f} mm/s). "
-                "Motor 1's 480 mm/s² and rotary acceleration/deceleration settings are software profiles "
+                f"Motor 6 calibrated belt speed at 60 output rpm is {MOTOR6_GUI_MAX_MM_S:.1f} mm/s. "
+                "Motor 1's 600 mm/s² and rotary acceleration/deceleration settings are software profiles "
                 "(rotary product pages do not specify max acceleration); validate the loaded machine. "
                 "Motor 5 has no intrinsic angular stop."
             ),

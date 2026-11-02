@@ -37,12 +37,12 @@ motor4_raw_position_controller:
 
 motor3_raw_position_controller:
   ros__parameters:
-    joints: [motor1_motor2]
+    joints: [motor4_joint]
     interface_name: motor3_position
 
 motor6_raw_position_controller:
   ros__parameters:
-    joints: [motor4_joint]
+    joints: [motor1_motor2]
     interface_name: motor6_position
 
 motor5_raw_position_controller:

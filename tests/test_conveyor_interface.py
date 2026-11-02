@@ -70,7 +70,8 @@ class ConveyorInterfaceTests(unittest.TestCase):
         g.startup_position_counts = None
         g.startup_stable_since = None
         g.last_stop_stamp = 0
-        g.feedback_joint = "motor4_joint"
+        g.feedback_joint = "motor1_motor2"
+        g.velocity_interface = "motor6_velocity"
         g.position_interface = "motor6_position"
         g.publisher = Publisher()
         g.status_publisher = Publisher()
@@ -85,7 +86,7 @@ class ConveyorInterfaceTests(unittest.TestCase):
     def request(self, **overrides):
         data = dict(id="request-1", session=self.guard.session,
                     reference_id=self.guard.motion.reference_id, op="index", index=1,
-                    rpm=OPERATING_MAX_RPM, acceleration=96.0, deceleration=96.0, sent_ns=self.stamp())
+                    rpm=OPERATING_MAX_RPM, acceleration=120.0, deceleration=120.0, sent_ns=self.stamp())
         data.update(overrides)
         return NS(data=json.dumps(data))
 
@@ -93,7 +94,7 @@ class ConveyorInterfaceTests(unittest.TestCase):
         stamp = self.stamp() if stamp is None else stamp
         return NS(header=NS(stamp=NS(sec=stamp // 1_000_000_000, nanosec=stamp % 1_000_000_000)),
                   joint_names=[self.guard.feedback_joint], interface_values=[NS(
-                      interface_names=names or [self.guard.position_interface, "velocity", "motor6_status"],
+                      interface_names=names or [self.guard.position_interface, self.guard.velocity_interface, "motor6_status"],
                       values=values or [1_000_000 / COUNTS_PER_RAD, 0.0, 0x27])])
 
     def test_request_ack_retry_and_heartbeat_ownership(self):
@@ -162,12 +163,12 @@ class ConveyorInterfaceTests(unittest.TestCase):
         self.assertEqual(self.guard.motion.feedback_time, initial_stamp)
 
     def test_combined_and_standalone_dynamic_feedback_mapping(self):
-        for joint, position in (("motor4_joint", "motor6_position"), ("motor6_joint", "position")):
+        for joint, position, velocity in (("motor1_motor2", "motor6_position", "motor6_velocity"), ("motor6_joint", "position", "velocity")):
             self.guard.motion = ConveyorIndex()
             self.guard.last_feedback_stamp = None
             self.guard.startup_position_counts = None
             self.guard.startup_stable_since = None
-            self.guard.feedback_joint, self.guard.position_interface = joint, position
+            self.guard.feedback_joint, self.guard.position_interface, self.guard.velocity_interface = joint, position, velocity
             for _ in range(65):
                 self.now += .005
                 self.guard.on_feedback(self.feedback_message())
@@ -183,6 +184,14 @@ class ConveyorInterfaceTests(unittest.TestCase):
 
 
 class ExternalCommandTests(unittest.TestCase):
+    def test_motor2_gui_accepts_90_and_100_percent_output_speed(self):
+        module = load_without_ros("yuzu_peeler_gui.py")
+        for rpm in (374.4, 416.0):
+            self.assertEqual(module.checked_axis2_rpm(rpm), rpm)
+            self.assertEqual(module.checked_rotary_ramp(832.0, 832.0, 832.0, rpm), (832.0, 832.0))
+        with self.assertRaises(ValueError):
+            module.checked_axis2_rpm(416.1)
+
     def test_gui_uses_scalar_targets_and_empty_stop(self):
         module = load_without_ros("yuzu_peeler_gui.py")
         node = module.YuzuOperatorNode.__new__(module.YuzuOperatorNode)
@@ -214,18 +223,22 @@ class ExternalCommandTests(unittest.TestCase):
     def test_motor2_scalar_uses_existing_watchdog_guard(self):
         module = load_without_ros("azd3a_axis2_velocity_guard.py")
         guard = module.Axis2VelocityGuard.__new__(module.Axis2VelocityGuard)
-        guard.max_rpm = 332.8
-        guard.max_acceleration_rpm_s = 665.6
-        guard.acceleration_rpm_s = 665.6
-        guard.deceleration_rpm_s = 665.6
+        guard.max_rpm = 416.0
+        guard.max_acceleration_rpm_s = 832.0
+        guard.acceleration_rpm_s = 832.0
+        guard.deceleration_rpm_s = 832.0
         guard.output_rpm = 0.0
         guard.get_clock = lambda: NS(now=lambda: "stamp")
         guard.get_logger = lambda: NS(error=lambda message: None)
         guard.on_external_command(NS(data=100.0))
         self.assertEqual(guard.target_rpm, 100.0)
         self.assertEqual(guard.last_command_time, "stamp")
-        guard.on_external_command(NS(data=400.0))
-        self.assertEqual(guard.target_rpm, 100.0)
+        guard.on_external_command(NS(data=374.4))
+        self.assertEqual(guard.target_rpm, 374.4)
+        guard.on_external_command(NS(data=416.0))
+        self.assertEqual(guard.target_rpm, 416.0)
+        guard.on_external_command(NS(data=416.1))
+        self.assertEqual(guard.target_rpm, 416.0)
 
     def test_motor5_zero_is_published_for_remote_gui(self):
         module = load_without_ros("azd3a_motor5_position_guard.py")
@@ -261,8 +274,8 @@ class ConveyorGuiTests(unittest.TestCase):
         gui.operation_conveyor_target = None
         gui.motor6_running = False
         gui.motor6_command_rpm = 0.0
-        gui.motor6_entry = Value("90.0")
-        gui.motor6_accel_entry = gui.motor6_decel_entry = Value("96.0")
+        gui.motor6_entry = Value(f"{self.module.MOTOR6_GUI_MAX_MM_S:.3f}")
+        gui.motor6_accel_entry = gui.motor6_decel_entry = Value("120.0")
         gui.status_text = Value()
         gui.motor6_index_feedback = Value()
         gui.motor6_pitch_text = Value()

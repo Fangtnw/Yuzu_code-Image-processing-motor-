@@ -51,7 +51,7 @@ class ConveyorPlant:
 
     def request(self, direction=1, rpm=OPERATING_MAX_RPM):
         index = self.motion.index if self.motion.origin_counts is not None else 0
-        self.motion.request_index(index + direction, rpm, 96.0, 96.0, self.time)
+        self.motion.request_index(index + direction, rpm, 120.0, 120.0, self.time)
 
     def finish(self, **kwargs):
         for _ in range(3000):
@@ -131,7 +131,7 @@ class ConveyorIndexTests(unittest.TestCase):
         self.assertEqual(plant.motion.state, "interrupted")
         self.assertEqual(plant.motion.target_counts, target)
         with self.assertRaises(ValueError):
-            plant.motion.request_index(1, OPERATING_MAX_RPM, 96., 96., plant.time)
+            plant.motion.request_index(1, OPERATING_MAX_RPM, 120., 120., plant.time)
         plant.motion.resume(plant.time)
         plant.finish()
         self.assertEqual(plant.motion.target_counts, target)
@@ -171,24 +171,24 @@ class ConveyorIndexTests(unittest.TestCase):
         plant = ConveyorPlant()
         plant.request()
         target = plant.motion.target_counts
-        plant.motion.request_index(1, OPERATING_MAX_RPM, 96., 96., plant.time)
+        plant.motion.request_index(1, OPERATING_MAX_RPM, 120., 120., plant.time)
         self.assertEqual(plant.motion.target_counts, target)
         with self.assertRaises(ValueError):
-            plant.motion.request_index(2, OPERATING_MAX_RPM, 96., 96., plant.time)
+            plant.motion.request_index(2, OPERATING_MAX_RPM, 120., 120., plant.time)
         plant.finish()
-        plant.motion.request_index(1, OPERATING_MAX_RPM, 96., 96., plant.time)
+        plant.motion.request_index(1, OPERATING_MAX_RPM, 120., 120., plant.time)
         self.assertEqual(plant.motion.state, "ready")
         self.assertEqual(plant.motion.index, 1)
 
     def test_bad_parameters_and_nonfinite_commands_are_rejected(self):
-        for kwargs in (dict(max_rpm=60), dict(max_ramp=float("nan")),
+        for kwargs in (dict(max_rpm=61), dict(max_ramp=float("nan")),
                        dict(command_timeout=1.0), dict(loop_counts=0), dict(tolerance_mm=1)):
             with self.assertRaises(ValueError):
                 ConveyorIndex(**kwargs)
         plant = ConveyorPlant()
-        for args in ((1, 0, 96, 96), (1, OPERATING_MAX_RPM + 1, 96, 96),
-                     (1, OPERATING_MAX_RPM, 1, 96), (1, OPERATING_MAX_RPM, 96, 1),
-                     (1, float("nan"), 96, 96), (0.5, OPERATING_MAX_RPM, 96, 96)):
+        for args in ((1, 0, 120, 120), (1, OPERATING_MAX_RPM + 1, 120, 120),
+                     (1, OPERATING_MAX_RPM, 1, 120), (1, OPERATING_MAX_RPM, 120, 1),
+                     (1, float("nan"), 120, 120), (0.5, OPERATING_MAX_RPM, 120, 120)):
             with self.assertRaises(ValueError):
                 plant.motion.request_index(*args, plant.time)
         self.assertIsNone(plant.motion.origin_counts)

@@ -13,8 +13,8 @@ LEGACY_PUBLIC_TOPIC = "/axis2_velocity_controller/commands_rpm"
 RAW_TOPIC = "/motor2_raw_velocity_controller/commands"
 LEGACY_RAW_TOPIC = "/axis2_raw_velocity_controller/commands"
 HARD_MAX_RPM = 416.0
-COMMISSIONING_MAX_RPM = 332.8
-DEFAULT_ACCELERATION_RPM_S = 665.6
+COMMISSIONING_MAX_RPM = 416.0
+DEFAULT_ACCELERATION_RPM_S = 832.0
 COMMAND_TIMEOUT_S = 0.5
 UPDATE_PERIOD_S = 0.005
 

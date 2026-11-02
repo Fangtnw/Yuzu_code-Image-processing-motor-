@@ -12,10 +12,10 @@ from std_msgs.msg import Float64, Float64MultiArray
 HARD_MIN_POSITION_M = 0.0
 # No maximum acceleration is published on the actuator product page. This
 # software ceiling limits launch overrides; the active default is the gentler
-# one-second ramp to the 80% speed cap.
+# one-second ramp to the configured speed cap.
 HARD_MAX_POSITION_M = 0.400
 HARD_MAX_VELOCITY_M_S = 0.600
-MAX_CONFIGURED_ACCELERATION_M_S2 = 0.480
+MAX_CONFIGURED_ACCELERATION_M_S2 = 0.600
 MIN_TRAVEL_INCREMENT_M = 0.0000012
 
 # Requirement-based assembled-machine defaults. The full 400 mm actuator
@@ -23,8 +23,8 @@ MIN_TRAVEL_INCREMENT_M = 0.0000012
 # manufacturer envelope above.
 DEFAULT_MIN_POSITION_M = 0.0
 DEFAULT_MAX_POSITION_M = 0.400
-DEFAULT_MAX_VELOCITY_M_S = 0.480
-DEFAULT_MAX_ACCELERATION_M_S2 = 0.480
+DEFAULT_MAX_VELOCITY_M_S = 0.600
+DEFAULT_MAX_ACCELERATION_M_S2 = 0.600
 UPDATE_RATE_HZ = 200.0
 PUBLIC_TOPIC = "/motor1_position_controller/commands"
 EXTERNAL_TOPIC = "/yuzu/motor1/target_position_mm"

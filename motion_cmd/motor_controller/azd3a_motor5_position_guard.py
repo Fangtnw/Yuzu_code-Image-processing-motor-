@@ -20,8 +20,8 @@ RAW_TOPIC = "/motor5_raw_position_controller/commands"
 JOINT_NAME = "motor4_joint"
 INTERFACE_NAME = "motor5_position"
 MAX_ANGLE_DEG = 180.0
-MAX_VELOCITY_RPM = 120.0
-MAX_ACCELERATION_RPM_S = 240.0
+MAX_VELOCITY_RPM = 150.0
+MAX_ACCELERATION_RPM_S = 300.0
 UPDATE_RATE_HZ = 200.0
 
 
@@ -49,7 +49,7 @@ class Motor5PositionGuard(Node):
         self.create_timer(1.0 / UPDATE_RATE_HZ, self.update)
         self.get_logger().info(
             "Motor 5 guard ready: operator zero required, +/-180 degrees, "
-            "120 rpm, 240 rpm/s software ramp (0.5 s ramp)"
+            "150 rpm, 300 rpm/s software ramp (0.5 s ramp)"
         )
 
     def on_dynamic_state(self, message: DynamicJointState) -> None:
