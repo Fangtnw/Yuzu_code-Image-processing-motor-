@@ -13,12 +13,17 @@ def build_parser():
                         help="Motor 3 blade distance from fruit center at slide 0 mm")
     parser.add_argument("--motor4-center-mm", type=float, default=35.0,
                         help="Motor 4 blade distance from fruit center at slide 0 mm")
+    parser.add_argument("--source-inset-mm", type=float, default=3.0,
+                        help="Detector's inward contour shift, restored for outer-surface feed")
+    parser.add_argument("--peel-depth-mm", type=float, default=0.0,
+                        help="Additional inward blade depth beyond the outer surface")
     parser.add_argument("--timeout-s", type=float, default=5.0)
     return parser
 
 
-def build_rows(data, motor3_center_mm=35.0, motor4_center_mm=35.0):
-    profile = ContourFeedProfile(data)
+def build_rows(data, motor3_center_mm=35.0, motor4_center_mm=35.0,
+               source_inset_mm=3.0, peel_depth_mm=0.0):
+    profile = ContourFeedProfile(data, source_inset_mm, peel_depth_mm)
     return tuple(
         profile.targets_at_motor5(
             waypoint.motor5_target_deg,
@@ -57,13 +62,18 @@ def main():
             rclpy.spin_once(node, timeout_sec=0.1)
         if node.data is None:
             raise RuntimeError("No complete /yuzu/contour_point_offsets message received")
-        rows = build_rows(node.data, args.motor3_center_mm, args.motor4_center_mm)
+        try:
+            rows = build_rows(node.data, args.motor3_center_mm, args.motor4_center_mm,
+                              args.source_inset_mm, args.peel_depth_mm)
+        except ValueError as error:
+            raise SystemExit(f"Contour feed preview rejected: {error}") from error
     finally:
         node.destroy_node()
         if rclpy.ok():
             rclpy.shutdown()
 
-    print("No motion commands. Motor 5 sweep, mirror-averaged slide targets (mm):")
+    print(f"No motion commands. Outer-surface feed, source inset "
+          f"{args.source_inset_mm:g} mm, peel depth {args.peel_depth_mm:g} mm.")
     print("M5 deg | M3 rays deg | M3 mm | M4 rays deg | M4 mm")
     for row in rows:
         print(f"{row['motor5_deg']:6.1f} | "

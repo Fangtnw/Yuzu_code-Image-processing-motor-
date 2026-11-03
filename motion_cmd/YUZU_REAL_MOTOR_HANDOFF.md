@@ -3,12 +3,13 @@
 # Yuzu diameter reference and motor sequence
 
 The camera measures the yuzu contour. Motors 3 and 4 use the selected
-contour radii for peeling feed. The existing GUI uses fixed Motor 5 angles.
-The Step 3 plan moves Motor 5 to +90°, sweeps counterclockwise to -10° with
-slide updates every 5°, retracts both slides, then returns Motor 5 to zero.
-See
-[MOTOR5_PEEL_ORBIT.md](MOTOR5_PEEL_ORBIT.md). The existing GUI still follows
-its manual fixed-angle sequence.
+contour radii for peeling feed. The GUI's current Operation Sequence tab
+indexes Motor 6, captures camera data after the conveyor stops, pierces and
+lifts with Motor 1, runs the coordinated Motor 3/4/5 peel, then returns Motor
+1 home. The Step 3 plan moves Motor 5 to +90°, sweeps counterclockwise to
+-10° while interpolating slide targets from the captured 5° contour,
+retracts both slides, then returns Motor 5 to zero. See
+[MOTOR5_PEEL_ORBIT.md](MOTOR5_PEEL_ORBIT.md).
 
 ## Current machine roles
 
@@ -20,13 +21,10 @@ its manual fixed-angle sequence.
 | 5 | Rotate the peeler mechanism through the peeling orbit |
 | 6 | Index the next fruit fixture |
 
-The existing GUI already has a manually advanced sequence: Motor 6 index,
-Motor 1 approach, Motor 5 to +90°, Motor 2 spin, Motors 3/4 feed in, Motor 5
-to 0° with a Motor 2 stop command, Motors 3/4 grip, Motor 1 return, Motors
-3/4 home, and cycle wait. This describes current software behavior, not a
-validated automatic peeling cycle. The fixed Motor 5 angles and the exact
-meaning/order of slide feed and grip positions need confirmation for the
-physical setup. The GUI's Motor 3/4 positions remain manually entered.
+The full sequence can run from one GUI button, while individual steps remain
+selectable. Motor 2 fruit rotation is still manual and is not started by this
+sequence. The full cycle has offline tests; it has not been validated as a
+powered end-to-end cycle on the machine.
 
 ## Camera input and diameter
 
@@ -59,8 +57,10 @@ at both slides' zero is consistent with the 35 mm radial measurement, but
 must be checked with the installed blades. A single diameter cannot define
 the 5° contour feed distances.
 
-The preliminary slide target is `35 - mean(radius_primary, radius_mirror)`
-mm using the inset contour points for each blade. Reject any target outside 0..20 mm;
+The preliminary outer-surface slide target is
+`35 - (mean(radius_primary, radius_mirror) + source_inset_mm)` mm using the
+inset contour points for each blade. The source inset is currently 3 mm and
+additional peel depth is 0 mm. Reject any target outside 0..20 mm;
 do not clip it. The 5° orbit and required angle mapping are recorded in
 `MOTOR5_PEEL_ORBIT.md`. Confirm the detector-angle direction and blade
 geometry before changing the GUI sequence or enabling automatic slide

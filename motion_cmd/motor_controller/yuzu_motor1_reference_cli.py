@@ -28,7 +28,7 @@ def build_parser():
                         help="Motor travel sign for a positive image Y offset; default -1")
     parser.add_argument("--lift-mm", type=float, default=None,
                         help="Step 2 lift distance, 100..150 mm; required to execute lift")
-    parser.add_argument("--step", choices=("plan", "insert", "lift", "demo"), default="plan",
+    parser.add_argument("--step", choices=("plan", "insert", "lift", "home", "demo"), default="plan",
                         help="demo performs insertion then lift using one captured offset")
     parser.add_argument("--execute", action="store_true",
                         help="Publish the selected guarded Motor 1 target")
@@ -174,6 +174,8 @@ def main():
             print("Motor 1 Step 1 and Step 2 demo complete", flush=True)
         elif args.step == "lift":
             publish_and_wait("lift", targets["lift_target_mm"])
+        elif args.step == "home":
+            publish_and_wait("home", targets["home_position_mm"])
     finally:
         node.destroy_node()
         if rclpy.ok():

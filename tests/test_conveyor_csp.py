@@ -64,7 +64,32 @@ class CspTests(unittest.TestCase):
         motion = ConveyorIndex()
         motion.feedback(0, 0, True, 0)
         motion.feedback(2754581, 0, True, .005)
+        self.assertFalse(motion.feedback_fault)
+        motion.feedback(2754581 * 2, 0, True, .010)
         self.assertTrue(motion.feedback_fault)
+        diagnostic = motion.status(.010)["last_discontinuity"]
+        self.assertEqual(diagnostic["delta_counts"], 2754581)
+        self.assertAlmostEqual(diagnostic["elapsed_s"], .005)
+        self.assertGreater(abs(diagnostic["delta_mm"]), diagnostic["allowed_mm"])
+        self.assertIn("allowed", motion.message)
         motion.feedback(0, 0, True, .010)
         self.assertFalse(motion.fresh(.010))
         self.assertFalse(motion.enabled)
+
+    def test_small_jitter_above_old_discontinuity_threshold_is_accepted(self):
+        from motor_controller.conveyor_index import MM_PER_COUNT
+        motion = ConveyorIndex()
+        motion.feedback(0, 60.0, True, 0.0)
+        motion.feedback(round(0.770 / MM_PER_COUNT), 60.0, True, 0.005)
+        self.assertFalse(motion.feedback_fault)
+        self.assertIsNone(motion.last_discontinuity)
+
+    def test_single_impossible_encoder_sample_is_discarded_if_next_sample_recovers(self):
+        motion = ConveyorIndex()
+        motion.feedback(1000000, 10.0, True, 0.0)
+        motion.feedback(19000000, 10.0, True, .005)
+        self.assertFalse(motion.feedback_fault)
+        motion.feedback(1004000, 10.0, True, .010)
+        self.assertFalse(motion.feedback_fault)
+        self.assertEqual(motion.position_counts, 1004000)
+        self.assertIsNone(motion.suspect_discontinuity)

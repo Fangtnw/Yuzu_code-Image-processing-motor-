@@ -2,6 +2,11 @@
 
 import json
 import math
+import os
+import signal
+import subprocess
+import sys
+import tempfile
 import time
 import uuid
 import tkinter as tk
@@ -12,10 +17,13 @@ from control_msgs.msg import DynamicJointState
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import JointState
-from std_msgs.msg import Empty, Float64, Float64MultiArray, String
+from std_msgs.msg import Empty, Float32, Float32MultiArray, Float64, Float64MultiArray, String
 
 from motor_controller.conveyor_index import NOMINAL_PITCH_MM, TRANSMISSION_RATIO, TRAVEL_CALIBRATION, OPERATING_MAX_RPM, OPERATING_SPEED_MM_S
 from motor_controller.motor5_gui_steps import stepped_motor5_target
+from motor_controller.yuzu_contour_feed import ContourFeedProfile
+from motor_controller.yuzu_motor1_reference import Motor1CameraReference
+from motor_controller.yuzu_step3_plan import build_step3_actions
 
 
 MOTOR1_TOPIC = "/yuzu/motor1/target_position_mm"
@@ -56,6 +64,7 @@ MOTOR6_GUI_MAX_RPM = OPERATING_MAX_RPM
 MOTOR6_ACCELERATION_RPM_S = 120.0  # reaches 60 rpm in 0.5 s
 MOTOR6_PULLEY_DIAMETER_MM = 30.0
 MOTOR6_GUI_MAX_MM_S = OPERATING_SPEED_MM_S
+MOTOR6_DEFAULT_INDEX_SPEED_MM_S = 100.0
 FEEDBACK_STALE_S = 2.0
 OPERATION_ENABLED_MASK = 0x006F
 OPERATION_ENABLED_VALUE = 0x0027
@@ -157,6 +166,8 @@ class YuzuOperatorNode(Node):
         zero_qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.create_subscription(Float64, MOTOR5_ZERO_POSITION_TOPIC, self._motor5_zero_position, zero_qos)
         self.create_subscription(JointState, "/joint_states", self._joint_state, 1)
+        self.create_subscription(Float32, "/yuzu/y_offset_mm", self._camera_offset, 1)
+        self.create_subscription(Float32MultiArray, "/yuzu/contour_point_offsets", self._camera_contour, 1)
         self.create_subscription(
             DynamicJointState, "/dynamic_joint_states", self._dynamic_joint_state, 1
         )
@@ -177,6 +188,23 @@ class YuzuOperatorNode(Node):
             "motor5": None,
             "motor6": None,
         }
+        self.camera_offset = None
+        self.camera_offset_at = 0.0
+        self.camera_contour = None
+        self.camera_contour_at = 0.0
+
+    def _camera_offset(self, message: Float32) -> None:
+        if math.isfinite(message.data):
+            self.camera_offset = float(message.data)
+            self.camera_offset_at = time.monotonic()
+
+    def _camera_contour(self, message: Float32MultiArray) -> None:
+        try:
+            ContourFeedProfile(message.data)
+        except ValueError:
+            return
+        self.camera_contour = tuple(message.data)
+        self.camera_contour_at = time.monotonic()
 
     def _motor6_index_status(self, message: String) -> None:
         try:
@@ -339,6 +367,15 @@ class YuzuOperatorGui:
         self.motor6_lease_request = None
         self.operation_conveyor_request = None
         self.operation_conveyor_target = None
+        self.operation_pending_advance = False
+        self.operation_snapshot = None
+        self.operation_process = None
+        self.operation_process_step = None
+        self.operation_contour_file = None
+        self.operation_auto_running = False
+        self.operation_capture_after = None
+        self.operation_capture_deadline = None
+        self.operation_conveyor_deadline = None
         self.motor5_origin_rad = None
 
         root.title("Yuzu Peeler — Motor Operator")
@@ -445,7 +482,7 @@ class YuzuOperatorGui:
     def _build_operation_tab(self, parent: ttk.Frame) -> None:
         ttk.Label(
             parent,
-            text="Peeling operation — execute one guarded stage at a time; verify motion before pressing Next step. Motor 1 home is the top at 0 mm; larger positions move down.",
+            text="Run the full cycle with one button, or select a step for individual testing. After the conveyor stops, capture the visible fruit before Motor 1 pierces it. The saved contour is reused after lifting.",
             style="Status.TLabel",
             wraplength=900,
         ).pack(anchor="w", pady=(0, 10))
@@ -453,13 +490,18 @@ class YuzuOperatorGui:
         settings.pack(fill="x", pady=(0, 10))
         fields = (
             ("Step 1 · Motor 6 positioning distance (mm)", f"{NOMINAL_PITCH_MM:.3f}"),
-            ("Step 2 · Motor 1 approach position (mm)", "300.0"),
-            ("Step 4.2 · Motor 3 feed-in position (mm)", "5.0"),
-            ("Step 4.2 · Motor 4 feed-in position (mm)", "5.0"),
-            ("Step 5 · Motor 3 gripping position (mm)", "2.0"),
-            ("Step 5 · Motor 4 gripping position (mm)", "2.0"),
-            ("Step 4.1 · Motor 2 CCW speed (rpm)", "374.4"),
-            ("Step 6 · Motor 1 home position (mm)", "0.0"),
+            ("Step 1 · Conveyor speed (mm/s)", f"{MOTOR6_DEFAULT_INDEX_SPEED_MM_S:.3f}"),
+            ("Step 1 · Conveyor accel (rpm/s)", f"{MOTOR6_ACCELERATION_RPM_S:.1f}"),
+            ("Step 1 · Conveyor decel (rpm/s)", f"{MOTOR6_ACCELERATION_RPM_S:.1f}"),
+            ("Camera frame Motor 1 encoder (mm)", "204.0"),
+            ("Motor 1 home (mm)", "0.0"),
+            ("Motor 1 lift distance (mm)", "150.0"),
+            ("Motor 1 extra allowance (mm)", "0.0"),
+            ("Fixed demo Y offset (mm)", "-30.0"),
+            ("Fixed demo inset radius (mm)", "17.0"),
+            ("Motor 3 center distance (mm)", "35.0"),
+            ("Motor 4 center distance (mm)", "35.0"),
+            ("Motor 5 sweep speed (deg/s)", "10.0"),
         )
         self.operation_entries = {}
         for row, (label, default) in enumerate(fields):
@@ -470,17 +512,26 @@ class YuzuOperatorGui:
                 entry.configure(state="readonly")
             entry.grid(row=row // 2, column=(row % 2) * 2 + 1, sticky="e", padx=4, pady=3)
             self.operation_entries[label] = entry
+        source_row = ttk.Frame(parent)
+        source_row.pack(fill="x", pady=(0, 6))
+        ttk.Label(source_row, text="Data source:").pack(side="left")
+        self.operation_data_source = tk.StringVar(value="Camera snapshot")
+        source_choice = ttk.Combobox(source_row, textvariable=self.operation_data_source,
+                                     values=("Camera snapshot", "Fixed demo values"),
+                                     state="readonly", width=20)
+        source_choice.pack(side="left", padx=8)
+        self.operation_snapshot_text = tk.StringVar(value="No cycle snapshot captured")
+        self.operation_capture_button = ttk.Button(source_row, text="Capture snapshot",
+                                                   command=self.operation_capture_snapshot)
+        self.operation_capture_button.pack(side="left")
+        ttk.Label(source_row, textvariable=self.operation_snapshot_text).pack(side="left", padx=10)
         steps = (
             "1. Yuzu positioning — Motor 6 forward distance",
-            "2. Yuzu placement — Motor 1 approach",
-            "3. Peeler positioning — Motor 5 to 90°",
-            "4.1. Motor 2 start rotating CCW",
-            "4.2. Motors 3/4 feed in",
-            "4.3. Motor 5 rotate CW back 90°; stop Motor 2",
-            "5. Yuzu gripping — Motors 3/4 gripping distances",
-            "6. Feed motion — Motor 1 home position",
-            "7. Yuzu release — Motors 3/4 home",
-            "8. Waiting for next cycle — stop Motor 2",
+            "2. Capture camera offset and 72-ray contour after conveyor stops",
+            "3. Yuzu placement — Motor 1 pierce using saved offset",
+            "4. Lift yuzu — Motor 1 rise by selected distance",
+            "5. Peel contour — Motors 3/4 feed while Motor 5 sweeps, then retract",
+            "6. Motor 1 return home",
         )
         self.operation_steps = steps
         self.operation_step_index = 0
@@ -493,10 +544,22 @@ class YuzuOperatorGui:
             self.operation_step_labels.append(label)
         self.operation_step_text = tk.StringVar()
         ttk.Label(parent, textvariable=self.operation_step_text, wraplength=900).pack(anchor="w", pady=4)
+        select_row = ttk.Frame(parent)
+        select_row.pack(fill="x", pady=4)
+        ttk.Label(select_row, text="Run one step:").pack(side="left")
+        self.operation_selected_step = tk.StringVar(value=steps[0])
+        ttk.Combobox(select_row, textvariable=self.operation_selected_step, values=steps,
+                     state="readonly", width=82).pack(side="left", padx=8)
+        self.operation_selected_button = ttk.Button(select_row, text="Execute selected step",
+                                                    command=self.operation_run_selected)
+        self.operation_selected_button.pack(side="left")
         buttons = ttk.Frame(parent)
         buttons.pack(fill="x", pady=(8, 0))
         self.operation_next_button = ttk.Button(buttons, text="Execute next step", command=self.operation_next)
         self.operation_next_button.pack(side="left")
+        self.operation_full_button = ttk.Button(buttons, text="Run full sequence",
+                                                command=self.operation_run_full)
+        self.operation_full_button.pack(side="left", padx=8)
         ttk.Button(buttons, text="Reset sequence", command=self.operation_reset).pack(side="left", padx=8)
         ttk.Button(buttons, text="Stop motors", command=self.stop_rotary_motors).pack(side="right")
         self._update_operation_step_text()
@@ -523,58 +586,277 @@ class YuzuOperatorGui:
             )
             self.operation_next_button.configure(state="normal")
 
+    def operation_capture_snapshot(self, min_received_at: float = 0.0,
+                                   show_error: bool = True) -> bool:
+        try:
+            if self.operation_data_source.get() == "Camera snapshot":
+                now = time.monotonic()
+                if (self.node.camera_offset is None or self.node.camera_contour is None
+                        or now - self.node.camera_offset_at > 1.0
+                        or now - self.node.camera_contour_at > 1.0
+                        or self.node.camera_offset_at < min_received_at
+                        or self.node.camera_contour_at < min_received_at
+                        or abs(self.node.camera_offset_at - self.node.camera_contour_at) > 0.5):
+                    raise ValueError("Need a fresh camera Y offset and 72-ray contour for the same visible fruit")
+                offset = self.node.camera_offset
+                contour = self.node.camera_contour
+                source = "camera"
+            else:
+                offset = float(self._operation_value("Fixed demo Y offset (mm)"))
+                radius = float(self._operation_value("Fixed demo inset radius (mm)"))
+                if not math.isfinite(radius) or radius <= 0:
+                    raise ValueError("Fixed demo inset radius must be positive")
+                contour = tuple(value for angle in range(0, 360, 5)
+                                for value in (angle, radius * math.sin(math.radians(angle)),
+                                              radius * math.cos(math.radians(angle))))
+                source = "fixed demo"
+            reference = self._operation_reference()
+            reference.targets(offset, float(self._operation_value("Motor 1 lift distance (mm)")))
+            motor3_center = float(self._operation_value("Motor 3 center distance (mm)"))
+            motor4_center = float(self._operation_value("Motor 4 center distance (mm)"))
+            sweep_speed = float(self._operation_value("Motor 5 sweep speed (deg/s)"))
+            if not 1.0 <= sweep_speed <= 30.0:
+                raise ValueError("Motor 5 sweep speed must be 1..30 deg/s")
+            build_step3_actions(contour, motor3_center, motor4_center)
+            self.operation_snapshot = {"source": source, "offset": offset,
+                                       "contour": tuple(contour), "captured_at": time.monotonic(),
+                                       "motor1_reference": reference,
+                                       "lift_mm": float(self._operation_value("Motor 1 lift distance (mm)")),
+                                       "motor3_center": motor3_center,
+                                       "motor4_center": motor4_center,
+                                       "sweep_speed": sweep_speed}
+            self.operation_snapshot_text.set(f"Saved {source}: Y {offset:+.2f} mm, 72 rays")
+            self.status_text.set("Cycle snapshot captured; this offset and contour will be reused after lift.")
+            return True
+        except (ValueError, TypeError) as error:
+            self.operation_snapshot_error = str(error)
+            if show_error:
+                messagebox.showerror("Snapshot unavailable", str(error))
+            return False
+
+    def _operation_reference(self) -> Motor1CameraReference:
+        return Motor1CameraReference(
+            frame_center_position_mm=float(self._operation_value("Camera frame Motor 1 encoder (mm)")),
+            home_position_mm=float(self._operation_value("Motor 1 home (mm)")),
+            allowance_mm=float(self._operation_value("Motor 1 extra allowance (mm)")),
+        )
+
+    def _operation_start_process(self, command: list[str], step: int, advance: bool) -> None:
+        self.operation_process = subprocess.Popen(command, stdout=subprocess.PIPE,
+                                                  stderr=subprocess.STDOUT, text=True)
+        self.operation_process_step = (step, advance)
+        self.status_text.set(f"Running {self.operation_steps[step]} — waiting for measured completion")
+
+    def operation_run_selected(self) -> None:
+        self._operation_run_step(self.operation_steps.index(self.operation_selected_step.get()), False)
+
+    def operation_run_full(self) -> None:
+        if self.operation_auto_running or self.operation_process is not None or self.motor6_pending:
+            self.status_text.set("Wait for the current operation before starting a full sequence.")
+            return
+        if not all(self._operation_step_ready(step) for step in (0, 2, 4)):
+            messagebox.showerror("Sequence not ready", "Motors 1, 3, 4, 5 and 6 need fresh enabled feedback.")
+            return
+        try:
+            home_mm = float(self._operation_value("Motor 1 home (mm)"))
+            self._operation_reference().targets(
+                0.0, float(self._operation_value("Motor 1 lift distance (mm)")))
+            positions = (self.node.axis1_position_m, self.node.motor3_position_m,
+                         self.node.motor4_position_m, self.node.motor5_position_rad,
+                         self.node.motor5_zero_position_rad)
+            if any(value is None for value in positions):
+                raise ValueError("Motor position or Motor 5 runtime zero is unavailable")
+            if abs(self.node.axis1_position_m * 1000.0 - home_mm) > 0.1:
+                raise ValueError(f"Motor 1 must start at home {home_mm:.3f} mm; measured {self.node.axis1_position_m * 1000:.3f} mm")
+            if abs(self.node.motor3_position_m * 1000.0) > 0.05 or abs(self.node.motor4_position_m * 1000.0) > 0.05:
+                raise ValueError("Motors 3 and 4 must start retracted at 0 mm")
+            if abs(math.degrees(self.node.motor5_position_rad - self.node.motor5_zero_position_rad)) > 0.1:
+                raise ValueError("Motor 5 must start at its operator-set runtime zero")
+            status = self.node.motor6_index_status
+            if not (self.node.motor6_status_fresh() and status.get("stopped")
+                    and status.get("state") in ("ready", "unreferenced")):
+                raise ValueError("Conveyor must be stopped and ready to index")
+        except ValueError as error:
+            messagebox.showerror("Sequence not ready", str(error))
+            return
+        self.operation_snapshot = None
+        self.operation_snapshot_text.set("Waiting for conveyor, then camera capture")
+        self.operation_step_index = 0
+        self.operation_conveyor_target = None
+        self.operation_capture_after = None
+        self.operation_capture_deadline = None
+        self.operation_conveyor_deadline = time.monotonic() + 30.0
+        self.operation_auto_running = True
+        self._update_operation_step_text()
+        self._operation_run_step(0, True)
+        if self.operation_conveyor_request is None:
+            self._stop_full_sequence("Conveyor index did not start")
+
+    def _stop_full_sequence(self, reason: str) -> None:
+        self.operation_auto_running = False
+        self.operation_capture_after = None
+        self.operation_capture_deadline = None
+        self.operation_conveyor_deadline = None
+        self.status_text.set(f"Full sequence stopped: {reason}")
+
+    def _advance_full_sequence(self) -> None:
+        if not self.operation_auto_running:
+            return
+        if self.operation_process is not None or self.motor6_pending or self.operation_conveyor_request:
+            return
+        step = self.operation_step_index
+        if step == 0:
+            self._stop_full_sequence("Conveyor indexing did not complete")
+            return
+        if step >= len(self.operation_steps):
+            self.operation_auto_running = False
+            self.status_text.set("Full sequence complete; all commanded steps confirmed by feedback.")
+            return
+        if step == 1:
+            if not self._operation_conveyor_ready():
+                status = self.node.motor6_index_status
+                if (not self.node.motor6_status_fresh()
+                        or status.get("state") in ("interrupted", "fault", "error")
+                        or time.monotonic() > self.operation_conveyor_deadline):
+                    self._stop_full_sequence("Conveyor did not reach stopped index target")
+                return
+            now = time.monotonic()
+            if self.operation_capture_after is None:
+                self.operation_capture_after = now
+                self.operation_capture_deadline = now + 10.0
+                self.status_text.set("Conveyor stopped; waiting for a new camera offset and contour")
+                return
+            if now > self.operation_capture_deadline:
+                self._stop_full_sequence("No valid camera snapshot within 10 seconds after conveyor stopped")
+                return
+            if self.operation_data_source.get() == "Camera snapshot":
+                if (self.node.camera_offset_at < self.operation_capture_after
+                        or self.node.camera_contour_at < self.operation_capture_after):
+                    return
+            if not self.operation_capture_snapshot(self.operation_capture_after, show_error=False):
+                if self.operation_snapshot_error.startswith("Need a fresh camera"):
+                    return
+                self._stop_full_sequence(self.operation_snapshot_error)
+                return
+            self.operation_step_index = 2
+            self._update_operation_step_text()
+            return
+        self._operation_run_step(step, True)
+        if self.operation_process is None:
+            self._stop_full_sequence("Step did not start; check the operation message")
+
+    def _operation_step_ready(self, step: int) -> bool:
+        motors = {0: (6,), 1: (), 2: (1,), 3: (1,), 4: (3, 4, 5), 5: (1,)}[step]
+        return all(self.node.feedback_is_fresh_for(f"motor{motor}")
+                   and self.node.drive_status[f"motor{motor}"] is not None
+                   and (self.node.drive_status[f"motor{motor}"] & OPERATION_ENABLED_MASK)
+                   == OPERATION_ENABLED_VALUE for motor in motors)
+
     def operation_reset(self) -> None:
+        if self.operation_auto_running or self.operation_process is not None or self.operation_conveyor_request:
+            self.status_text.set("Wait for the active operation to finish before resetting.")
+            return
         self.operation_conveyor_request = None
         self.operation_conveyor_target = None
+        self.operation_snapshot = None
+        self.operation_snapshot_text.set("No cycle snapshot captured")
         self.operation_step_index = 0
         self._update_operation_step_text()
         self.status_text.set("Operation sequence reset; no motion command was sent.")
 
     def operation_next(self) -> None:
-        if self.motor6_pending or self.operation_conveyor_request or not self._operation_conveyor_ready():
-            self.status_text.set("Wait for Motor 6 to finish its indexed step before placement.")
+        self._operation_run_step(self.operation_step_index, True)
+
+    def _operation_run_step(self, step: int, advance: bool) -> None:
+        if self.operation_auto_running and not advance:
+            self.status_text.set("Wait for the full sequence to finish before running an individual step.")
             return
-        step = self.operation_step_index
+        if not self._operation_step_ready(step):
+            self.status_text.set("Selected step requires fresh feedback and enabled drives for its motors.")
+            return
+        if self.operation_process is not None or self.motor6_pending or self.operation_conveyor_request:
+            self.status_text.set("Wait for the active operation to finish.")
+            return
+        if advance and not self._operation_conveyor_ready():
+            self.status_text.set("Wait for the indexed conveyor step to finish.")
+            return
         if step == 0:
-            if self.step_motor6(1):
+            try:
+                speed = float(self._operation_value("Step 1 · Conveyor speed (mm/s)"))
+                acceleration = float(self._operation_value("Step 1 · Conveyor accel (rpm/s)"))
+                deceleration = float(self._operation_value("Step 1 · Conveyor decel (rpm/s)"))
+            except ValueError as error:
+                messagebox.showerror("Invalid conveyor profile", str(error))
+                return
+            if self.step_motor6(1, speed, acceleration, deceleration):
                 self.operation_conveyor_request = self.motor6_pending["id"]
+                self.operation_pending_advance = advance
             return
-        elif step == 1:
-            self._set_entry_value(self.axis1_entry, self._operation_value("Step 2 · Motor 1 approach position (mm)"))
-            self.move_axis1()
-        elif step == 2:
-            self._set_entry_value(self.motor5_entry, "90.0")
-            self.motor5_direction.set(1)
-            self.move_motor5()
-        elif step == 3:
-            self._set_entry_value(self.axis2_entry, self._operation_value("Step 4.1 · Motor 2 CCW speed (rpm)"))
-            self.axis2_direction.set(-1)
-            self.start_axis2()
-        elif step == 4:
-            self._set_entry_value(self.motor3_entry, self._operation_value("Step 4.2 · Motor 3 feed-in position (mm)"))
-            self.move_motor3()
-            self._set_entry_value(self.motor4_entry, self._operation_value("Step 4.2 · Motor 4 feed-in position (mm)"))
-            self.move_motor4()
-        elif step == 5:
-            self._set_entry_value(self.motor5_entry, "0.0")
-            self.motor5_direction.set(1)
-            self.move_motor5()
-            self.stop_axis2()
-        elif step == 6:
-            self._set_entry_value(self.motor3_entry, self._operation_value("Step 5 · Motor 3 gripping position (mm)"))
-            self.move_motor3()
-            self._set_entry_value(self.motor4_entry, self._operation_value("Step 5 · Motor 4 gripping position (mm)"))
-            self.move_motor4()
-        elif step == 7:
-            self._set_entry_value(self.axis1_entry, self._operation_value("Step 6 · Motor 1 home position (mm)"))
-            self.move_axis1()
-        elif step == 8:
-            self.home_motor3()
-            self.home_motor4()
-        elif step == 9:
-            self.stop_axis2()
-        self.operation_step_index += 1
-        self._update_operation_step_text()
+        if step == 1:
+            if self.operation_conveyor_target is not None and not self._operation_conveyor_target_stopped():
+                self.status_text.set("Wait for the conveyor to stop before capturing the fruit.")
+                return
+            if self.operation_capture_snapshot():
+                if advance or step >= self.operation_step_index:
+                    self.operation_step_index = 2
+                    self._update_operation_step_text()
+            return
+        if self.operation_snapshot is None:
+            if self.operation_data_source.get() == "Fixed demo values":
+                if not self.operation_capture_snapshot():
+                    return
+            else:
+                messagebox.showerror("No cycle snapshot", "Capture the visible fruit before lifting, or select fixed demo values.")
+                return
+        try:
+            if step in (2, 3, 5):
+                offset = self.operation_snapshot["offset"]
+                lift = self.operation_snapshot["lift_mm"]
+                reference = self.operation_snapshot["motor1_reference"]
+                targets = reference.targets(offset, lift)
+                part = {2: "insert", 3: "lift", 5: "home"}[step]
+                if part in ("insert", "lift"):
+                    expected = (targets["home_position_mm"] if part == "insert"
+                                else targets["insertion_target_mm"])
+                    measured = (None if self.node.axis1_position_m is None
+                                else self.node.axis1_position_m * 1000.0)
+                    if measured is None or abs(measured - expected) > 0.1:
+                        raise ValueError(
+                            f"Motor 1 must be at {expected:.3f} mm before {part}; "
+                            f"measured {measured:.3f} mm. Move it to the required start position first."
+                            if measured is not None else "Motor 1 position feedback is unavailable")
+                command = [sys.executable, "-u", "-m", "motor_controller.yuzu_motor1_reference_cli",
+                           "--y-offset-mm", str(offset), "--frame-center-mm", str(reference.frame_center_position_mm),
+                           "--home-mm", str(reference.home_position_mm), "--allowance-mm", str(reference.allowance_mm),
+                           "--lift-mm", str(lift), "--step", part, "--execute"]
+            elif step == 4:
+                motor3_center = self.operation_snapshot["motor3_center"]
+                motor4_center = self.operation_snapshot["motor4_center"]
+                speed = self.operation_snapshot["sweep_speed"]
+                if not 1.0 <= speed <= 30.0:
+                    raise ValueError("Motor 5 sweep speed must be 1..30 deg/s")
+                build_step3_actions(self.operation_snapshot["contour"], motor3_center, motor4_center)
+                with tempfile.NamedTemporaryFile("w", suffix=".json", prefix="yuzu_contour_",
+                                                 delete=False) as handle:
+                    json.dump(self.operation_snapshot["contour"], handle)
+                    self.operation_contour_file = handle.name
+                command = [sys.executable, "-u", "-m", "motor_controller.yuzu_step3_sequence",
+                           "--contour-file", self.operation_contour_file,
+                           "--motor3-center-mm", str(motor3_center),
+                           "--motor4-center-mm", str(motor4_center),
+                           "--sweep-speed-deg-s", str(speed), "--execute"]
+            else:
+                return
+            self._operation_start_process(command, step, advance)
+        except (ValueError, OSError, TypeError) as error:
+            if self.operation_contour_file:
+                try:
+                    os.unlink(self.operation_contour_file)
+                except OSError:
+                    pass
+                self.operation_contour_file = None
+            self.status_text.set(f"Operation rejected: {error}")
+            messagebox.showerror("Operation rejected", str(error))
 
     def _build_motor1(self, parent: ttk.Frame) -> None:
         frame = ttk.LabelFrame(parent, text="Motor 1 — Vertical position", padding=12)
@@ -694,8 +976,7 @@ class YuzuOperatorGui:
         row.pack(fill="x")
         ttk.Label(row, text="Belt speed (mm/s)").pack(side="left")
         self.motor6_entry = ttk.Entry(row, width=12)
-        # The validator tolerates the 0.001 mm/s display rounding at the cap.
-        self.motor6_entry.insert(0, f"{MOTOR6_GUI_MAX_MM_S:.3f}")
+        self.motor6_entry.insert(0, f"{MOTOR6_DEFAULT_INDEX_SPEED_MM_S:.3f}")
         self.motor6_entry.pack(side="right")
         distance_row = ttk.Frame(frame)
         distance_row.pack(fill="x", pady=(4, 0))
@@ -1137,6 +1418,8 @@ class YuzuOperatorGui:
         self.status_text.set("Motor 6 manual conveyor command sent; a new step grid starts after manual motion.")
 
     def stop_motor6(self) -> None:
+        if self.operation_auto_running:
+            self._stop_full_sequence("Conveyor stop or status loss")
         self.motor6_running = False
         self.motor6_command_rpm = 0.0
         self.motor6_pending = None
@@ -1162,18 +1445,22 @@ class YuzuOperatorGui:
         self.status_text.set("Motor 6 index request sent; waiting for backend acceptance.")
         return True
 
-    def step_motor6(self, direction: int) -> bool:
+    def step_motor6(self, direction: int, speed_mm_s: float | None = None,
+                    acceleration_rpm_s: float | None = None,
+                    deceleration_rpm_s: float | None = None) -> bool:
         status = self.node.motor6_index_status
         if (self.motor6_running or not status.get("stopped")
                 or status.get("state") not in ("ready", "unreferenced")):
             messagebox.showerror("Motor 6 not ready", "Wait until stopped; use Resume for an interrupted step.")
             return False
         try:
-            speed_rpm = checked_motor6_speed_mm_s(float(self.motor6_entry.get()))
+            speed_rpm = checked_motor6_speed_mm_s(
+                float(self.motor6_entry.get()) if speed_mm_s is None else speed_mm_s)
             if speed_rpm <= 0.0:
                 raise ValueError("Step speed must be greater than zero")
             acceleration, deceleration = checked_rotary_ramp(
-                float(self.motor6_accel_entry.get()), float(self.motor6_decel_entry.get()),
+                float(self.motor6_accel_entry.get()) if acceleration_rpm_s is None else acceleration_rpm_s,
+                float(self.motor6_decel_entry.get()) if deceleration_rpm_s is None else deceleration_rpm_s,
                 MOTOR6_ACCELERATION_RPM_S, speed_rpm,
             )
         except ValueError as error:
@@ -1184,7 +1471,18 @@ class YuzuOperatorGui:
                                          acceleration=acceleration, deceleration=deceleration)
 
     def resume_motor6(self) -> None:
-        self._request_motor6_index("resume")
+        try:
+            speed_rpm = checked_motor6_speed_mm_s(float(self.motor6_entry.get()))
+            if speed_rpm <= 0.0:
+                raise ValueError("Resume speed must be greater than zero")
+            acceleration, deceleration = checked_rotary_ramp(
+                float(self.motor6_accel_entry.get()), float(self.motor6_decel_entry.get()),
+                MOTOR6_ACCELERATION_RPM_S, speed_rpm)
+        except ValueError as error:
+            messagebox.showerror("Invalid Motor 6 resume profile", str(error))
+            return
+        self._request_motor6_index("resume", rpm=speed_rpm,
+                                   acceleration=acceleration, deceleration=deceleration)
 
     def jog_motor6(self, direction: int) -> None:
         status = self.node.motor6_index_status
@@ -1230,10 +1528,16 @@ class YuzuOperatorGui:
                 self.operation_conveyor_request = None
                 if accepted:
                     self.operation_conveyor_target = (status["session"], status["reference_id"], status["target_index"])
-                    self.operation_step_index = 1
-                    self._update_operation_step_text()
+                    if self.operation_pending_advance or self.operation_step_index == 0:
+                        self.operation_step_index = 1
+                        self._update_operation_step_text()
+                elif self.operation_auto_running:
+                    self._stop_full_sequence(status.get("request_message", "Conveyor request rejected"))
+                self.operation_pending_advance = False
         elif pending and time.monotonic() - pending["sent"] > 1.0:
             self.stop_motor6()
+            if self.operation_auto_running:
+                self._stop_full_sequence("Conveyor acknowledgement timed out")
             self.status_text.set("No conveyor acknowledgement; stop requested. Check backend status before retrying.")
         if self.motor6_lease:
             if not fresh:
@@ -1261,12 +1565,45 @@ class YuzuOperatorGui:
     def _operation_conveyor_ready(self) -> bool:
         if self.operation_step_index != 1:
             return True
+        return self._operation_conveyor_target_stopped()
+
+    def _operation_conveyor_target_stopped(self) -> bool:
         status = self.node.motor6_index_status
         return (self.node.motor6_status_fresh() and status.get("state") == "ready"
                 and status.get("stopped") and self.operation_conveyor_target ==
                 (status.get("session"), status.get("reference_id"), status.get("index")))
 
+    def _poll_operation_process(self) -> None:
+        process = self.operation_process
+        if process is None or process.poll() is None:
+            return
+        output, _ = process.communicate()
+        step, advance = self.operation_process_step
+        self.operation_process = None
+        self.operation_process_step = None
+        if self.operation_contour_file:
+            try:
+                os.unlink(self.operation_contour_file)
+            except OSError:
+                pass
+            self.operation_contour_file = None
+        if process.returncode == 0:
+            if advance or step >= self.operation_step_index:
+                self.operation_step_index = step + 1
+                self._update_operation_step_text()
+            self.status_text.set(f"Completed {self.operation_steps[step]} (feedback confirmed).")
+        else:
+            detail = (output.strip()[-1500:] if output.strip()
+                      else f"Child command exited with status {process.returncode}")
+            self.status_text.set(f"Operation stopped: {detail}")
+            if self.operation_auto_running:
+                self._stop_full_sequence(detail)
+            messagebox.showerror("Operation stopped", detail)
+
     def stop_rotary_motors(self) -> None:
+        self.operation_auto_running = False
+        if self.operation_process is not None and self.operation_process.poll() is None:
+            self.operation_process.send_signal(signal.SIGINT)
         self.axis2_running = False
         self.axis2_command_rpm = 0.0
         self.motor6_running = False
@@ -1278,15 +1615,17 @@ class YuzuOperatorGui:
         for _ in range(5):
             self.node.publish_axis2(0.0)
             self.node.publish_motor6(0.0)
-        self.status_text.set("Motor 2 and Motor 6 guarded stops requested.")
+        self.status_text.set("Sequence interrupt requested; Motor 2/6 controlled stops sent. Position guards retain their last targets.")
 
     def tick(self) -> None:
         # Drain available subscriptions without keeping old position samples in
         # a GUI-rate queue. Motion itself runs in the independent 200 Hz guard.
         for _ in range(8):
             rclpy.spin_once(self.node, timeout_sec=0.0)
+        self._poll_operation_process()
         self.motor5_origin_rad = self.node.motor5_zero_position_rad
         self._update_motor6_index()
+        self._advance_full_sequence()
         backend = {
             "motor1": self.node.motor1_publisher.get_subscription_count() > 0
             or self.node.feedback_times["motor1"] is not None,
@@ -1437,12 +1776,24 @@ class YuzuOperatorGui:
         self.connection_text.set(
             f"Control paths: {connected_count}/6 · feedback: {fresh_count}/6 · drives enabled: {status_count}/6"
         )
-        if (status_count == len(backend) and self.operation_step_index < len(self.operation_steps)
+        if (self.operation_step_index < len(self.operation_steps)
+                and self._operation_step_ready(self.operation_step_index)
+                and not self.operation_auto_running
+                and self.operation_process is None
                 and not self.motor6_pending and not self.operation_conveyor_request
                 and self._operation_conveyor_ready()):
             self.operation_next_button.configure(state="normal")
         else:
             self.operation_next_button.configure(state="disabled")
+        self.operation_selected_button.configure(
+            state="normal" if self._operation_step_ready(self.operation_steps.index(self.operation_selected_step.get()))
+            and not self.operation_auto_running and self.operation_process is None
+            and not self.motor6_pending and not self.operation_conveyor_request else "disabled")
+        self.operation_full_button.configure(
+            state="normal" if not self.operation_auto_running and self.operation_process is None
+            and not self.motor6_pending and not self.operation_conveyor_request
+            and all(self._operation_step_ready(step) for step in (0, 2, 4)) else "disabled")
+        self.operation_capture_button.configure(state="disabled" if self.operation_auto_running else "normal")
         if connected_count == 0:
             banner, color = "BACKEND OFFLINE · motor commands disabled", "#5b6470"
         elif fresh_count != connected_count:
@@ -1462,6 +1813,8 @@ class YuzuOperatorGui:
         self.root.after(100, self.tick)
 
     def close(self) -> None:
+        if self.operation_process is not None:
+            self.operation_process.send_signal(signal.SIGINT)
         self.axis2_running = False
         self.motor6_running = False
         for _ in range(5):

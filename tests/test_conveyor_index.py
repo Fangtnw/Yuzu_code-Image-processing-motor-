@@ -140,6 +140,24 @@ class ConveyorIndexTests(unittest.TestCase):
         self.assertAlmostEqual((plant.position - plant.origin) * MM_PER_COUNT,
                                2 * NOMINAL_PITCH_MM, delta=0.0201)
 
+    def test_resume_can_use_lower_speed_without_changing_absolute_target(self):
+        plant = ConveyorPlant()
+        plant.request()
+        for _ in range(120):
+            plant.tick()
+        target = plant.motion.target_counts
+        plant.motion.stop("measured overspeed")
+        for _ in range(200):
+            plant.tick()
+        lower_speed = 100.0 / MM_S_PER_RPM
+        plant.motion.resume(plant.time, lower_speed, 120.0, 120.0)
+        self.assertAlmostEqual(plant.motion.speed_rpm, lower_speed)
+        self.assertEqual(plant.motion.target_counts, target)
+        plant.peak_rpm = 0.0
+        plant.finish()
+        self.assertLessEqual(plant.peak_rpm, lower_speed + 0.1)
+        self.assertEqual(plant.motion.target_counts, target)
+
     def test_watchdog_feedback_loss_and_disabled_drive_stop_without_completing(self):
         for failure in (dict(heartbeat=False), dict(feedback=False), dict(enabled=False)):
             with self.subTest(failure=failure):

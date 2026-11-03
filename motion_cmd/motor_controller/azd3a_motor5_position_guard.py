@@ -13,6 +13,7 @@ COMMAND_TOPIC = "/motor5_position_controller/commands_deg"
 MANUAL_STEP_TOPIC = "/motor5_position_controller/manual_step_deg"
 SET_ZERO_TOPIC = "/motor5_position_controller/set_zero"
 EXTERNAL_COMMAND_TOPIC = "/yuzu/motor5/target_position_deg"
+SWEEP_SPEED_TOPIC = "/yuzu/motor5/max_velocity_deg_s"
 EXTERNAL_STEP_TOPIC = "/yuzu/motor5/jog_deg"
 EXTERNAL_ZERO_TOPIC = "/yuzu/motor5/set_zero"
 ZERO_POSITION_TOPIC = "/yuzu/motor5/zero_position_rad"
@@ -34,11 +35,13 @@ class Motor5PositionGuard(Node):
         self.target_position = None
         self.command_velocity = 0.0
         self.manual_step_active = False
+        self.max_velocity_deg_s = MAX_VELOCITY_RPM * 6.0
         self.raw_publisher = self.create_publisher(Float64MultiArray, RAW_TOPIC, 10)
         zero_qos = QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL)
         self.zero_publisher = self.create_publisher(Float64, ZERO_POSITION_TOPIC, zero_qos)
         self.create_subscription(Float64, COMMAND_TOPIC, self.on_command, 10)
         self.create_subscription(Float64, EXTERNAL_COMMAND_TOPIC, self.on_command, 10)
+        self.create_subscription(Float64, SWEEP_SPEED_TOPIC, self.on_speed_limit, 10)
         self.create_subscription(Float64, MANUAL_STEP_TOPIC, self.on_manual_step, 10)
         self.create_subscription(Float64, EXTERNAL_STEP_TOPIC, self.on_manual_step, 10)
         self.create_subscription(Empty, SET_ZERO_TOPIC, self.on_set_zero, 10)
@@ -94,6 +97,14 @@ class Motor5PositionGuard(Node):
         self.target_position = self.origin + math.radians(offset_deg)
         self.get_logger().info(f"Accepted Motor 5 signed angle {offset_deg:.3f} deg")
 
+    def on_speed_limit(self, message: Float64) -> None:
+        value = message.data
+        if not math.isfinite(value) or not 1.0 <= value <= MAX_VELOCITY_RPM * 6.0:
+            self.get_logger().error("REJECTED Motor 5 speed limit: expected 1..900 deg/s")
+            return
+        self.max_velocity_deg_s = value
+        self.get_logger().info(f"Motor 5 speed limit {value:.2f} deg/s")
+
     def on_manual_step(self, message: Float64) -> None:
         """Jog relative to the current position before the operator defines zero."""
         step_deg = message.data
@@ -117,7 +128,7 @@ class Motor5PositionGuard(Node):
             return
         dt = 1.0 / UPDATE_RATE_HZ
         error = self.target_position - self.command_position
-        max_velocity = MAX_VELOCITY_RPM * math.pi / 30.0
+        max_velocity = math.radians(self.max_velocity_deg_s)
         max_acceleration = MAX_ACCELERATION_RPM_S * math.pi / 30.0
         if abs(error) < 1e-10 and abs(self.command_velocity) < 1e-10:
             self.command_position = self.target_position

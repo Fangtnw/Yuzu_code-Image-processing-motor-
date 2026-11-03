@@ -26,6 +26,10 @@ NOMINAL_LOOP_MM = NOMINAL_PITCH_MM * FIXTURE_COUNT
 FEEDBACK_TIMEOUT_S = 0.1
 SETTLE_TIME_S = 0.15
 STOP_SPEED_MM_S = 0.02
+# Allow one short PDO sample of position/velocity quantization and timestamp
+# jitter at the 60 rpm operating limit. The separate velocity overspeed check
+# remains at max_rpm + 1 rpm.
+ENCODER_DISCONTINUITY_MARGIN_MM = 0.2
 
 
 class ConveyorIndex:
@@ -67,6 +71,8 @@ class ConveyorIndex:
         self.last_command = self.last_update = self.deadline = None
         self.settle_since = None
         self.last_overspeed = None
+        self.last_discontinuity = None
+        self.suspect_discontinuity = None
 
     def feedback(self, raw_counts, velocity_rpm, enabled, now):
         if self.feedback_fault:
@@ -89,13 +95,39 @@ class ConveyorIndex:
             delta = (raw_counts - self.raw_counts + 2**31) % 2**32 - 2**31
             # Unwrap the multi-turn signed PDO at either boundary. A reset or
             # implausible discontinuity requires investigation, not a new origin.
-            allowance = 60.0 * MM_S_PER_RPM * elapsed + 0.1
+            allowance = self.max_rpm * MM_S_PER_RPM * elapsed + ENCODER_DISCONTINUITY_MARGIN_MM
             if allowance >= 2**31 * MM_PER_COUNT or abs(delta) * MM_PER_COUNT > allowance:
-                self.stop("Encoder discontinuity; restart and re-reference after inspection")
+                diagnostic = {
+                    "previous_raw_counts": self.raw_counts,
+                    "raw_counts": raw_counts,
+                    "delta_counts": delta,
+                    "delta_mm": delta * MM_PER_COUNT,
+                    "elapsed_s": elapsed,
+                    "allowed_mm": allowance,
+                    "reported_velocity_rpm": velocity_rpm,
+                    "command_velocity_rpm": self.output_rpm,
+                }
+                self.last_discontinuity = diagnostic
+                if self.suspect_discontinuity is None:
+                    # Drop a single impossible PDO sample without moving the
+                    # trusted baseline. A persistent offset trips on the next
+                    # fresh sample; a one-frame spike is ignored.
+                    self.suspect_discontinuity = diagnostic
+                    self.message = (
+                        f"Discarded one encoder sample ({delta * MM_PER_COUNT:+.3f} mm in "
+                        f"{elapsed * 1000:.1f} ms); verifying next feedback"
+                    )
+                    return
+                self.stop(
+                    f"Encoder discontinuity: {delta * MM_PER_COUNT:+.3f} mm in "
+                    f"{elapsed * 1000:.1f} ms; allowed {allowance:.3f} mm. "
+                    "Restart and re-reference after inspection"
+                )
                 self.enabled = False
                 self.feedback_fault = True
                 return
             position = self.position_counts + delta
+            self.suspect_discontinuity = None
         self.raw_counts = raw_counts
         self.position_counts = position
         if self.command_counts is None:
@@ -199,11 +231,16 @@ class ConveyorIndex:
         self.deadline = now + max(5.0, 2.0 * travel_time + 3.0)
         self.message = f"Indexing to fixture {self.target_index % FIXTURE_COUNT} (index {self.target_index})"
 
-    def resume(self, now):
+    def resume(self, now, speed=None, acceleration=None, deceleration=None):
         if self.state != "interrupted" or self.target_counts is None or not self.stopped(now):
             raise ValueError("Resume requires an interrupted target and stopped, fresh feedback")
         if abs(self.error_mm()) > 1000.0:
             raise ValueError("Interrupted target is too far away; realign and set reference")
+        if sum(value is not None for value in (speed, acceleration, deceleration)) not in (0, 3):
+            raise ValueError("Resume profile must include speed, acceleration, and deceleration together")
+        if speed is not None:
+            self.profile(speed, acceleration, deceleration)
+            self.speed_rpm, self.acceleration, self.deceleration = speed, acceleration, deceleration
         self._begin(now)
 
     def heartbeat(self, now):
@@ -325,6 +362,10 @@ class ConveyorIndex:
                                 if self.feedback_time is not None else None),
             "enabled": self.enabled, "feedback_fault": self.feedback_fault,
             "last_overspeed": self.last_overspeed,
+            "last_discontinuity": self.last_discontinuity,
+            "requested_speed_rpm": self.speed_rpm,
+            "acceleration_rpm_s": self.acceleration,
+            "deceleration_rpm_s": self.deceleration,
             "command_position_rad": (self.command_counts / COUNTS_PER_RAD
                                       if self.command_counts is not None else None),
         }

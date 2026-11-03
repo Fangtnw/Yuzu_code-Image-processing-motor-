@@ -13,7 +13,13 @@ SLIDE_INCREMENT_MM = 0.0001
 class ContourFeedProfile:
     """72 measured triples [angle_deg, dx_mm, dy_mm], zero up, CW positive."""
 
-    def __init__(self, data):
+    def __init__(self, data, source_inset_mm=3.0, peel_depth_mm=0.0):
+        self.source_inset_mm = float(source_inset_mm)
+        self.peel_depth_mm = float(peel_depth_mm)
+        if not math.isfinite(self.source_inset_mm) or self.source_inset_mm < 0:
+            raise ValueError("Source inset must be finite and nonnegative")
+        if not math.isfinite(self.peel_depth_mm) or self.peel_depth_mm < 0:
+            raise ValueError("Peel depth must be finite and nonnegative")
         if len(data) != 216:
             raise ValueError("Expected 72 contour points: [angle, dx_mm, dy_mm] x 72")
         radii = {}
@@ -48,12 +54,13 @@ class ContourFeedProfile:
     def slide_target_mm(self, angle_deg, blade_center_distance_mm=35.0):
         return self._target_from_radius(self.radius_mm(angle_deg), blade_center_distance_mm)
 
-    @staticmethod
-    def _target_from_radius(radius_mm, blade_center_distance_mm):
+    def _target_from_radius(self, radius_mm, blade_center_distance_mm):
         distance = float(blade_center_distance_mm)
         if not math.isfinite(distance) or distance <= 0:
             raise ValueError("Blade-center distance must be finite and positive")
-        target = distance - radius_mm
+        # The camera publishes a 3 mm inward-shifted contour. Restore its
+        # outer-surface radius, then add only the explicitly requested depth.
+        target = distance - (radius_mm + self.source_inset_mm) + self.peel_depth_mm
         if not SLIDE_MIN_MM <= target <= SLIDE_MAX_MM:
             raise ValueError(f"Slide target {target:.3f} mm is outside 0..20 mm")
         return round(round(target / SLIDE_INCREMENT_MM) * SLIDE_INCREMENT_MM, 4)
@@ -83,14 +90,28 @@ class ContourFeedProfile:
         motor4_angle = (180.0 + camera_angle_direction * travel_ccw) % 360.0
         motor3_mirror_angle = (-camera_angle_direction * travel_ccw) % 360.0
         motor4_mirror_angle = (180.0 - camera_angle_direction * travel_ccw) % 360.0
+        try:
+            motor3_target = self.averaged_slide_target_mm(
+                motor3_angle, motor3_mirror_angle, motor3_center_distance_mm)
+        except ValueError as error:
+            raise ValueError(
+                f"Motor 3 at Motor 5 {motor5:+.0f} degrees, rays "
+                f"{motor3_angle:g}/{motor3_mirror_angle:g}: {error}"
+            ) from error
+        try:
+            motor4_target = self.averaged_slide_target_mm(
+                motor4_angle, motor4_mirror_angle, motor4_center_distance_mm)
+        except ValueError as error:
+            raise ValueError(
+                f"Motor 4 at Motor 5 {motor5:+.0f} degrees, rays "
+                f"{motor4_angle:g}/{motor4_mirror_angle:g}: {error}"
+            ) from error
         return {
             "motor5_deg": motor5,
             "motor3_contour_angle_deg": motor3_angle,
             "motor3_mirror_angle_deg": motor3_mirror_angle,
             "motor4_contour_angle_deg": motor4_angle,
             "motor4_mirror_angle_deg": motor4_mirror_angle,
-            "motor3_target_mm": self.averaged_slide_target_mm(
-                motor3_angle, motor3_mirror_angle, motor3_center_distance_mm),
-            "motor4_target_mm": self.averaged_slide_target_mm(
-                motor4_angle, motor4_mirror_angle, motor4_center_distance_mm),
+            "motor3_target_mm": motor3_target,
+            "motor4_target_mm": motor4_target,
         }

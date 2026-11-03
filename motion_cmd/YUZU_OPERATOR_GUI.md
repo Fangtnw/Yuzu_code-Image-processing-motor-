@@ -40,8 +40,9 @@ protocol are specified in `MOTOR_ROS2_INTERFACE.md`.
   the custom `motor3_position` interface on slave 1 local Axis 2
   (physical Axis 5).
 - Motor 6 indexes 140 mm per step and is limited to 60 output rpm, about
-  133.83 mm/s at the calibrated conversion. The GUI defaults to that
-  speed and a 120 rpm/s software ramp, reaching the cap within 0.5 s;
+  133.83 mm/s at the calibrated conversion. The GUI requests 100.0 mm/s by
+  default with a 120 rpm/s software
+  ramp; the configured speed is reached within 0.5 s;
   acc/dec entries are constrained to satisfy that time.
   The 0.5-second watchdog remains, refreshed by index heartbeats during a
   step or speed commands during manual running. Backend indexing requires
@@ -118,26 +119,62 @@ reference, without accumulating previous stop errors. The backend generates
 an absolute CSP position trajectory internally. Continuous Motor 6 manual
 speed is disabled; use the **CSP jog (mm)** buttons for realignment, then
 reset the reference at the visible fixture mark. **Resume interrupted step** returns to the retained target
-after a stop; it does not add another step. **Reset step reference here**
+after a stop; it does not add another step. It uses the current Manual control
+Motor 6 speed and Acc/Dec fields, allowing a slower retry of an interrupted
+index without changing its absolute fixture target. **Reset step reference here**
 deliberately replaces the grid at a stopped position. A backend
 restart also requires a new grid. The prominent rotary stop sends repeated controlled
 zero-speed commands to Motors 2 and 6. Closing the GUI publishes repeated Motor 2 and
 Motor 6 zero commands; position axes remain holding their last guarded targets
 until the backend shuts down.
 
-The Operation sequence tab provides guarded, operator-advanced stages matching
-the peeling sequence: Motor 6 positioning, Motor 1 approach, Motor 5 peeler
-positioning, rotation/feed, Motor 2 stop after step 4.3, gripping, Motor 1 home,
-release, and cycle wait.
-Motor 1/3/4 operation distances and Motor 2 speed are editable before running.
-Motor 6's distance is read-only and comes from the backend. Placement cannot
-advance until the requested conveyor index reports stopped completion. No
-fixture-mark confirmation or sensor workflow is included in this version.
-The default Motor 1 operation approach/home positions are 300 mm and 0 mm;
-the complete step list remains visible with only the active step highlighted.
-The GUI unlocks motion only after all six mapped CiA-402 status words report
-Operation Enabled (`(statusword & 0x006F) == 0x0027`); otherwise the banner identifies the
-motors still starting or faulted.
+The Operation sequence tab has six actions: Motor 6 index, camera/fixed-data
+snapshot, Motor 1 pierce, Motor 1 lift, coordinated Motors 3/4/5 contour peel,
+and Motor 1 return home. **Run full sequence** starts at the conveyor index
+and automatically runs the remaining actions one by one. It waits for the
+conveyor's stopped target before capturing new camera messages, then uses
+that one snapshot for both Motor 1 moves and the contour peel. If camera
+messages do not arrive within 10 seconds, or any stage fails, the runner
+stops without sending the next target. **Execute next step** advances only after the
+feedback-checked Motor 1 or peel command succeeds; conveyor indexing still
+requires stopped completion before advancing. **Execute selected step** runs
+any chosen action independently, then sets **Execute next step** to the
+following action after successful completion. A failed action leaves the
+sequence pointer where it was. The
+separate Motor 2 rotation controls remain manual and are not part of Step 3.
+
+Choose **Camera snapshot** and press **Capture snapshot** while the fruit is
+visible for individual testing, or use the full runner to capture automatically
+after the conveyor stops. The GUI
+requires fresh `/yuzu/y_offset_mm` and `/yuzu/contour_point_offsets` samples
+close in receipt time, validates the 72-ray contour and all slide targets,
+then saves both values in the GUI for this cycle. The same Motor 1 offset,
+frame reference, home position, lift distance, and allowance are used for
+both pierce and lift. Step 3 passes the saved contour to the coordinator via
+a temporary JSON file, so loss of camera view after lifting does not change
+the feed targets. Resetting the sequence clears the snapshot; restarting the
+GUI also clears it. The camera messages lack a fruit ID or capture timestamp,
+so the operator must ensure both samples belong to the visible fruit.
+
+For a demo without the camera PC, choose **Fixed demo values**, set the signed
+Y offset and 5° inset contour radius, and capture a synthetic circular
+snapshot. The default offset is −30 mm and default inset radius is 17 mm;
+the Step 3 calculation restores the detector's 3 mm inset and targets the
+outer surface. The other editable fields include the Motor 1 frame encoder
+(default 204 mm), lift (default 150 mm), blade center distances (default
+35 mm each), and Motor 5 sweep speed (default 10°/s). Motor 6's index distance
+remains read-only from its backend. The Operation Sequence tab has its own
+Motor 6 speed (default 100.0 mm/s) and Acc/Dec fields (120 rpm/s each), so
+the full run does not inherit values left in Manual control. A manually selected lift still requires
+Motor 1 to be at the calculated pierce target; selected pierce requires Motor 1
+at its configured home position within 0.1 mm. The GUI reports the measured
+start position if that check fails. A selected peel still requires
+Motors 3/4 at zero and Motor 5 at its runtime zero. The GUI reports command
+success only after the child command verifies feedback.
+Each operation step unlocks when its required motors have fresh feedback and
+CiA-402 Operation Enabled status (`(statusword & 0x006F) == 0x0027`). This lets
+an operator test Motor 1 or Motors 3/4/5 without requiring the other drives.
+The banner still shows readiness for all six mapped motors.
 
 Motor 5 zero capture requires fresh feedback and an operator confirmation that
 the mechanism is stationary and at the intended reference pose. Since the

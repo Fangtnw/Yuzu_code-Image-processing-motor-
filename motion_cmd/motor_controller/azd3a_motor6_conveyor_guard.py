@@ -186,7 +186,14 @@ class Motor6ConveyorGuard(Node):
                     self.motion.jog(float(request["distance_mm"]), float(request["rpm"]),
                                     float(request["acceleration"]), float(request["deceleration"]), now)
                 elif operation == "resume":
-                    self.motion.resume(now)
+                    if all(key in request for key in ("rpm", "acceleration", "deceleration")):
+                        self.motion.resume(now, float(request["rpm"]),
+                                           float(request["acceleration"]),
+                                           float(request["deceleration"]))
+                    elif any(key in request for key in ("rpm", "acceleration", "deceleration")):
+                        raise ValueError("Resume profile requires rpm, acceleration, and deceleration together")
+                    else:
+                        self.motion.resume(now)
                 else:
                     raise ValueError("Unknown conveyor index operation")
             if self.motion.state in ("indexing", "jogging") and not was_indexing:

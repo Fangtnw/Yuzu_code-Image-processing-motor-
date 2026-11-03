@@ -10,7 +10,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1] / "motion_cmd"
 sys.path.insert(0, str(ROOT))
-from motor_controller.conveyor_index import ConveyorIndex, COUNTS_PER_RAD, OPERATING_MAX_RPM  # noqa: E402
+from motor_controller.conveyor_index import ConveyorIndex, COUNTS_PER_RAD, OPERATING_MAX_RPM, MM_S_PER_RPM  # noqa: E402
 
 
 def load_without_ros(filename):
@@ -24,7 +24,8 @@ def load_without_ros(filename):
     )]
     module = ModuleType("offline_" + path.stem)
     module.__dict__.update(Node=object, DynamicJointState=NS, JointState=NS,
-                           Float64MultiArray=NS, Float64=NS, Empty=NS, String=NS)
+                           Float64MultiArray=NS, Float64=NS, Float32=NS,
+                           Float32MultiArray=NS, Empty=NS, String=NS)
     exec(compile(tree, str(path), "exec"), module.__dict__)
     return module
 
@@ -268,10 +269,20 @@ class ConveyorGuiTests(unittest.TestCase):
                       motor6_status_fresh=lambda: True, motor6_index_publisher=Publisher(),
                       publish_motor6_index=self.sent.append,
                       publish_motor6=self.stops.append,
+                      axis1_position_m=0.0,
+                      feedback_is_fresh_for=lambda motor: True,
+                      drive_status={f"motor{motor}": 0x0027 for motor in range(1, 7)},
                       get_clock=lambda: NS(now=lambda: NS(nanoseconds=2_500_000_000)))
         gui.motor6_pending = gui.motor6_lease = gui.operation_conveyor_request = None
         gui.motor6_lease_request = None
         gui.operation_conveyor_target = None
+        gui.operation_process = None
+        gui.operation_contour_file = None
+        gui.operation_pending_advance = False
+        gui.operation_auto_running = False
+        gui.operation_capture_after = None
+        gui.operation_capture_deadline = None
+        gui.operation_conveyor_deadline = None
         gui.motor6_running = False
         gui.motor6_command_rpm = 0.0
         gui.motor6_entry = Value(f"{self.module.MOTOR6_GUI_MAX_MM_S:.3f}")
@@ -279,7 +290,12 @@ class ConveyorGuiTests(unittest.TestCase):
         gui.status_text = Value()
         gui.motor6_index_feedback = Value()
         gui.motor6_pitch_text = Value()
-        gui.operation_entries = {"Step 1 · Motor 6 positioning distance (mm)": Value("140.000")}
+        gui.operation_entries = {
+            "Step 1 · Motor 6 positioning distance (mm)": Value("140.000"),
+            "Step 1 · Conveyor speed (mm/s)": Value("100.000"),
+            "Step 1 · Conveyor accel (rpm/s)": Value("120.0"),
+            "Step 1 · Conveyor decel (rpm/s)": Value("120.0"),
+        }
         gui.operation_step_index = 0
         gui._update_operation_step_text = lambda: None
 
@@ -292,8 +308,17 @@ class ConveyorGuiTests(unittest.TestCase):
         self.assertFalse(self.gui.step_motor6(1))
         self.assertEqual(len(self.sent), 2)
 
+    def test_resume_request_uses_current_lower_gui_speed(self):
+        self.gui.motor6_entry = Value("100.000")
+        self.gui.resume_motor6()
+        self.assertEqual(self.sent[0]["op"], "resume")
+        self.assertAlmostEqual(self.sent[0]["rpm"], 100.0 / MM_S_PER_RPM)
+        self.assertEqual(self.sent[0]["acceleration"], 120.0)
+        self.assertEqual(self.sent[0]["deceleration"], 120.0)
+
     def test_rejection_does_not_advance_operation(self):
         self.gui.operation_next()
+        self.assertAlmostEqual(self.sent[0]["rpm"], 100.0 / MM_S_PER_RPM)
         self.gui.node.motor6_index_status.update(request_id=self.sent[0]["id"],
                                                 request_ok=False, request_message="not ready")
         self.gui._update_motor6_index()
@@ -325,6 +350,174 @@ class ConveyorGuiTests(unittest.TestCase):
         self.gui._update_motor6_index()
         self.assertEqual(self.stops, [0.0, 0.0])
         self.assertIsNone(self.gui.motor6_pending)
+
+    def test_fixed_snapshot_is_reused_for_motor1_lift_and_contour_peel(self):
+        gui = self.gui
+        gui.operation_data_source = Value("Fixed demo values")
+        gui.operation_snapshot_text = Value()
+        gui.operation_snapshot = None
+        gui.operation_contour_file = None
+        gui.operation_steps = ("conveyor", "capture", "pierce", "lift", "peel", "home")
+        gui.operation_entries.update({
+            "Camera frame Motor 1 encoder (mm)": Value("204"),
+            "Motor 1 home (mm)": Value("0"),
+            "Motor 1 lift distance (mm)": Value("150"),
+            "Motor 1 extra allowance (mm)": Value("0"),
+            "Fixed demo Y offset (mm)": Value("-30"),
+            "Fixed demo inset radius (mm)": Value("17"),
+            "Motor 3 center distance (mm)": Value("35"),
+            "Motor 4 center distance (mm)": Value("35"),
+            "Motor 5 sweep speed (deg/s)": Value("10"),
+        })
+        commands = []
+        gui._operation_start_process = lambda command, step, advance: commands.append((command, step, advance))
+        gui._operation_run_step(1, False)
+        self.assertEqual(gui.operation_snapshot["offset"], -30.0)
+        self.assertEqual(len(gui.operation_snapshot["contour"]), 216)
+        gui._operation_run_step(2, False)
+        self.assertIn("insert", commands[-1][0])
+        gui.node.axis1_position_m = 0.234
+        gui._operation_run_step(3, False)
+        self.assertIn("lift", commands[-1][0])
+        self.assertIn("-30.0", commands[-1][0])
+        gui._operation_run_step(4, False)
+        self.assertIn("--contour-file", commands[-1][0])
+        self.assertEqual(commands[-1][1:], (4, False))
+        import os
+        os.unlink(gui.operation_contour_file)
+
+    def test_camera_snapshot_rejects_stale_sample_and_keeps_captured_values(self):
+        gui = self.gui
+        gui.operation_data_source = Value("Camera snapshot")
+        gui.operation_snapshot_text = Value()
+        gui.operation_snapshot = None
+        gui.operation_entries.update({
+            "Camera frame Motor 1 encoder (mm)": Value("204"),
+            "Motor 1 home (mm)": Value("0"),
+            "Motor 1 lift distance (mm)": Value("150"),
+            "Motor 1 extra allowance (mm)": Value("0"),
+            "Motor 3 center distance (mm)": Value("35"),
+            "Motor 4 center distance (mm)": Value("35"),
+            "Motor 5 sweep speed (deg/s)": Value("10"),
+        })
+        import math
+        contour = [v for a in range(0, 360, 5)
+                   for v in (a, 17 * math.sin(math.radians(a)),
+                             17 * math.cos(math.radians(a)))]
+        gui.node.camera_offset = -30.0
+        gui.node.camera_contour = contour
+        gui.node.camera_offset_at = self.now - 2.0
+        gui.node.camera_contour_at = self.now
+        self.assertFalse(gui.operation_capture_snapshot())
+        gui.node.camera_offset_at = self.now
+        self.assertTrue(gui.operation_capture_snapshot())
+        gui.node.camera_offset = 5.0
+        gui.node.camera_contour = []
+        self.assertEqual(gui.operation_snapshot["offset"], -30.0)
+        self.assertEqual(len(gui.operation_snapshot["contour"]), 216)
+
+    def test_selected_step_success_sets_next_sequence_step(self):
+        gui = self.gui
+        gui.operation_steps = ("conveyor", "capture", "pierce", "lift", "peel", "home")
+        gui.operation_process = NS(poll=lambda: 0,
+                                   communicate=lambda: ("Motor 1 reached 232.9020 mm", ""),
+                                   returncode=0)
+        gui.operation_process_step = (2, False)
+        gui.operation_contour_file = None
+        gui.operation_step_index = 0
+        gui._poll_operation_process()
+        self.assertEqual(gui.operation_step_index, 3)
+        self.assertIn("pierce", gui.status_text.get())
+
+    def test_pierce_from_nonhome_reports_measured_start_and_sends_no_command(self):
+        gui = self.gui
+        gui.operation_process = None
+        gui.operation_snapshot = {"offset": -28.902,
+                                  "motor1_reference": self.module.Motor1CameraReference(),
+                                  "lift_mm": 150.0, "contour": ()}
+        gui.node.axis1_position_m = 0.0293532
+        commands = []
+        gui._operation_start_process = lambda *args: commands.append(args)
+        gui._operation_run_step(2, False)
+        self.assertEqual(commands, [])
+        self.assertIn("29.353", self.errors[-1])
+
+    def test_full_sequence_waits_for_conveyor_stop_then_new_camera_snapshot(self):
+        gui = self.gui
+        gui.operation_steps = ("conveyor", "capture", "pierce", "lift", "peel", "home")
+        gui.operation_snapshot = None
+        gui.operation_snapshot_text = Value()
+        gui.operation_data_source = Value("Camera snapshot")
+        gui.operation_entries.update({
+            "Camera frame Motor 1 encoder (mm)": Value("204"),
+            "Motor 1 home (mm)": Value("0"),
+            "Motor 1 lift distance (mm)": Value("150"),
+            "Motor 1 extra allowance (mm)": Value("0"),
+            "Motor 3 center distance (mm)": Value("35"),
+            "Motor 4 center distance (mm)": Value("35"),
+            "Motor 5 sweep speed (deg/s)": Value("10"),
+        })
+        gui.operation_auto_running = True
+        gui.operation_conveyor_deadline = self.now + 30.0
+        gui.operation_step_index = 1
+        gui.operation_conveyor_target = ("test", 1, 1)
+        status = gui.node.motor6_index_status
+        status.update(state="indexing", stopped=False, reference_id=1, target_index=1)
+        gui._advance_full_sequence()
+        self.assertIsNone(gui.operation_capture_after)
+        status.update(state="ready", stopped=True, index=1)
+        gui._advance_full_sequence()
+        self.assertEqual(gui.operation_capture_after, self.now)
+        import math
+        gui.node.camera_offset = -30.0
+        gui.node.camera_contour = [v for a in range(0, 360, 5)
+                                   for v in (a, 17 * math.sin(math.radians(a)),
+                                             17 * math.cos(math.radians(a)))]
+        gui.node.camera_offset_at = self.now - 0.1
+        gui.node.camera_contour_at = self.now - 0.1
+        gui._advance_full_sequence()
+        self.assertIsNone(gui.operation_snapshot)
+        self.now += 0.1
+        gui.node.camera_offset_at = self.now
+        gui.node.camera_contour_at = self.now
+        gui._advance_full_sequence()
+        self.assertEqual(gui.operation_step_index, 2)
+        self.assertEqual(gui.operation_snapshot["offset"], -30.0)
+        commands = []
+        def start_fake_step(step, advance):
+            commands.append((step, advance))
+            gui.operation_process = NS(poll=lambda: 0, communicate=lambda: ("reached", ""), returncode=0)
+            gui.operation_process_step = (step, advance)
+        gui._operation_run_step = start_fake_step
+        for step in (2, 3, 4, 5):
+            gui._advance_full_sequence()
+            self.assertEqual(commands[-1], (step, True))
+            gui._poll_operation_process()
+        gui._advance_full_sequence()
+        self.assertEqual(gui.operation_step_index, 6)
+        self.assertFalse(gui.operation_auto_running)
+
+    def test_full_sequence_button_starts_with_only_conveyor_index(self):
+        gui = self.gui
+        gui.operation_steps = ("conveyor", "capture", "pierce", "lift", "peel", "home")
+        gui.operation_snapshot = {"old": True}
+        gui.operation_snapshot_text = Value()
+        gui.operation_entries.update({
+            "Camera frame Motor 1 encoder (mm)": Value("204"),
+            "Motor 1 home (mm)": Value("0"),
+            "Motor 1 lift distance (mm)": Value("150"),
+            "Motor 1 extra allowance (mm)": Value("0"),
+        })
+        gui.node.motor3_position_m = 0.0
+        gui.node.motor4_position_m = 0.0
+        gui.node.motor5_position_rad = 1.5
+        gui.node.motor5_zero_position_rad = 1.5
+        gui.operation_run_full()
+        self.assertTrue(gui.operation_auto_running)
+        self.assertEqual(gui.operation_step_index, 0)
+        self.assertIsNone(gui.operation_snapshot)
+        self.assertEqual(len(self.sent), 1)
+        self.assertIsNotNone(gui.operation_conveyor_request)
 
 
 if __name__ == "__main__":

@@ -6,6 +6,55 @@ Current speed cap (2026-10-22): 60 output rpm, about 133.83 mm/s at the
 calibrated conversion, with a 120 rpm/s software ramp. The 90 mm/s values
 below document the earlier indexing trial and calibration.
 
+## 2026-11-03 full-sequence interruption inspection
+
+The running Motor 6 guard reported `max_rpm=60.0` and
+`max_acceleration_rpm_s=120.0`. At the time of inspection the GUI defaulted
+to 133.832 mm/s belt speed (60 output rpm) and 120 rpm/s for both acceleration
+and deceleration; its index request read the editable fields in the Manual
+control tab. The last
+observed live index status was `interrupted` with message **Encoder
+discontinuity; restart and re-reference after inspection**. This is not a
+speed-cap or settling-timeout message. The guard rejected a position jump
+larger than `60 rpm × elapsed sample time + 0.1 mm`, then latched
+`feedback_fault`; a later sample does not clear it. At a 5 ms feedback
+interval the permitted jump is about 0.769 mm. The original status did not
+record the measured jump, so the cause cannot be distinguished yet from a
+timing irregularity, position reset, or genuine encoder jump. The guard now
+adds `last_discontinuity` (raw counts, delta, elapsed time, allowed distance,
+reported and commanded speed) plus the requested speed and ramps to its
+status JSON. This is diagnostic only and requires a guard restart to take
+effect. Do not resume an index on a latched feedback fault; inspect and
+re-reference after restart.
+
+A subsequent screenshot showed the trip was **+0.770 mm in 5.0 ms** with
+**0.768 mm allowed**, only about 0.002 mm above the prior threshold while
+about 69 mm of the index remained. The continuity check now uses the
+configured maximum speed times the sample interval plus a 0.2 mm sampling
+margin. At the 60 rpm, 5 ms operating point this allows about 0.869 mm.
+The separate measured-velocity trip at 61 rpm, 0.1 s feedback timeout,
+0.5 s command watchdog, and drive status checks are unchanged. This change
+addresses the observed narrow threshold trip; the full conveyor index still
+needs a supervised retry and the diagnostic `reported_velocity_rpm` field
+must be checked if any interruption recurs.
+
+A later supervised index reported **137.18 mm/s measured** against the
+**136.06 mm/s** overspeed trip (60 rpm maximum plus 1 rpm tolerance), with
+67.72 mm remaining. The commanded default was still about 133.83 mm/s.
+This is a measured overspeed trip, distinct from the earlier encoder jump.
+The GUI now defaults to a **100.0 mm/s** request (about 44.83 rpm) with the
+same **120 rpm/s** acceleration and deceleration. The Operation Sequence tab
+has explicit conveyor speed and Acc/Dec fields, defaulting to these values,
+so its full-cycle index does not depend on the Manual control tab's fields.
+The guard's 60 rpm maximum and 61 rpm measured-speed trip remain unchanged.
+This is a lower request for the next supervised test, not a claim that the
+motor feedback issue is fully resolved.
+Resume now accepts a new speed/Acc/Dec profile while retaining the original
+absolute fixture target. The GUI's **Resume interrupted step** sends its
+current Manual control Motor 6 fields; set them to 100.0 mm/s and 120/120
+rpm/s before resuming an overspeed-interrupted target. A latched encoder
+discontinuity still cannot be cleared by Resume.
+
 ## Current trial calibration
 
 On 2026-10-13 the operator confirmed 25 motor-pulley teeth and 18
