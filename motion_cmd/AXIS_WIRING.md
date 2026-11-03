@@ -8,6 +8,15 @@ Axis 1–3 belong to EtherCAT slave position 0; Axis 4–6 belong to slave
 position 1. Each AZD3A-KED has
 three local axes with CiA-402 object offsets 0x0000, 0x0800, 0x1000.
 
+**Operator naming rule:** Continue calling motors by the numbers shown in the
+current GUI and operation sequence. Motor 1 is always vertical placement,
+Motor 2 yuzu spin, Motor 3 gripping/feed slide, Motor 4 peeling-depth slide,
+Motor 5 rotary peeler index, and Motor 6 conveyor. A GUI button labelled
+“Motor 3” still means the gripping/feed slide even though its cable is now on
+physical Axis 5. Only the backend mapping from a logical motor to an EtherCAT
+slave and local axis changes when wiring moves. Do not renumber GUI steps or
+public `/yuzu/motorN` topics to match connector numbers.
+
 | Physical axis | Slave position | Local axis | Logical motor | Machine role |
 |---|---:|---:|---:|---|
 | 1 | 0 | 1 | 1 | Vertical placement |

@@ -92,6 +92,18 @@ Then, from the extracted folder containing this README:
 bash scripts/start_yuzu_peeler.sh --workspace "$HOME/yuzu_ws"
 ```
 
+For the vision PC on the same Wi-Fi, use ROS domain 21 and the default ROS
+middleware that successfully discovers its camera node:
+
+```bash
+ROS_DOMAIN_ID=21 bash scripts/start_yuzu_peeler.sh --workspace "$HOME/yuzu_ws"
+```
+
+Do not pass `--ros-interface wlo1` for this setup: that option explicitly
+switches to Cyclone DDS, which prevented discovery of the camera PC here.
+See [`motion_cmd/ROS_WIFI_DISCOVERY.md`](motion_cmd/ROS_WIFI_DISCOVERY.md)
+for checks on both PCs.
+
 The helper sources ROS and the workspace and launches the GUI. It does not
 start EtherCAT or power hardware. Wait for fresh feedback and the ready
 indication before commanding motion. Never restart EtherCAT while a control
@@ -140,7 +152,8 @@ sha256sum -c SHA256SUMS
 
 ## Current integrated axes
 
-Physical port wiring differs from logical motor numbers. See
+The current GUI and operation sequence keep logical Motor 1–6 names; the
+backend maps those roles to the physical controller ports. See
 [`motion_cmd/AXIS_WIRING.md`](motion_cmd/AXIS_WIRING.md) before rebuilding or
 commissioning after a harness change.
 

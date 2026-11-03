@@ -1,12 +1,14 @@
 > Current integrated physical port wiring: [AXIS_WIRING.md](AXIS_WIRING.md). Motor numbers in this document identify machine roles.
 
-# Yuzu diameter reference and fixed motor sequence
+# Yuzu diameter reference and motor sequence
 
-Updated 2026-10-22 for the corrected machine concept. The camera measures the
-yuzu's **horizontal diameter**. Motors 3 and 4 use that measurement as a
-reference for grasping and peeling. Motor 5 rotates through a **fixed sequence**;
-its target angle is independent of the measured contour shape. The earlier
-angle-by-angle slide-feed and contour-following sweep plan is superseded.
+The camera measures the yuzu's **horizontal diameter**. Motors 3 and 4 use
+that measurement as a reference for grasping and peeling. The existing GUI
+uses fixed Motor 5 angles. The proposed future orbit uses a counterclockwise
+90° clearance move, then a 5° clockwise contour-feed sweep through zero to
+10° beyond it, then a return to zero. See
+[MOTOR5_PEEL_ORBIT.md](MOTOR5_PEEL_ORBIT.md). The existing GUI still follows
+its manual fixed-angle sequence.
 
 ## Current machine roles
 
@@ -15,7 +17,7 @@ angle-by-angle slide-feed and contour-following sweep plan is superseded.
 | 1 | Fruit/camera assembly approach and return |
 | 2 | Spin the yuzu during the peel stage |
 | 3 and 4 | Move opposing slides to grasp and peel positions |
-| 5 | Rotate peeler mechanism through fixed targets |
+| 5 | Rotate the peeler mechanism through the peeling orbit |
 | 6 | Index the next fruit fixture |
 
 The existing GUI already has a manually advanced sequence: Motor 6 index,
@@ -58,8 +60,9 @@ Once those quantities are calibrated, derive each slide target from the
 diameter and its own blade geometry, reject any target outside 0..20 mm,
 and require a fresh measurement for the current fruit. Do not clip an
 unreachable target. Keep Motor 5 angle targets independent of the camera
-diameter. Await operator confirmation of the intended fixed angles/order
-before changing the GUI sequence or enabling automatic slide targets.
+diameter. The proposed 5° orbit and slide update plan is recorded in
+`MOTOR5_PEEL_ORBIT.md`; calibration is required before changing the GUI
+sequence or enabling automatic slide targets.
 
 ## Existing guarded interfaces
 
