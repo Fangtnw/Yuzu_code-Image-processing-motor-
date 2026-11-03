@@ -2,11 +2,11 @@
 
 # Yuzu diameter reference and motor sequence
 
-The camera measures the yuzu's **horizontal diameter**. Motors 3 and 4 use
-that measurement as a reference for grasping and peeling. The existing GUI
-uses fixed Motor 5 angles. The proposed future orbit uses a counterclockwise
-90° clearance move, then a 5° clockwise contour-feed sweep through zero to
-10° beyond it, then a return to zero. See
+The camera measures the yuzu contour. Motors 3 and 4 use the selected
+contour radii for peeling feed. The existing GUI uses fixed Motor 5 angles.
+The Step 3 plan moves Motor 5 to +90°, sweeps counterclockwise to -10° with
+slide updates every 5°, retracts both slides, then returns Motor 5 to zero.
+See
 [MOTOR5_PEEL_ORBIT.md](MOTOR5_PEEL_ORBIT.md). The existing GUI still follows
 its manual fixed-angle sequence.
 
@@ -32,7 +32,9 @@ physical setup. The GUI's Motor 3/4 positions remain manually entered.
 
 `/yuzu/yellow_dot_offsets` is a `std_msgs/msg/Float32MultiArray` of 33 values:
 11 triples `[angle_deg, dx_mm, dy_mm]` for angles 30° through 330° at 30°
-spacing. Coordinates are relative to the segmentation centroid, X right and
+spacing. The new `/yuzu/contour_point_offsets` topic contains 72 measured
+triples at 5° spacing, including the red 0° point, for Step 3 feed planning.
+Coordinates are relative to the segmentation centroid, X right and
 Y up, with zero angle at the top and clockwise positive. The detector's points
 are shifted toward the centroid by a configured inset, currently 3 mm. The
 horizontal diameter is the sum of the radii at 90° and 270° plus twice the
@@ -42,27 +44,27 @@ inset. See `YUZU_CONTOUR_PREVIEW.md` for the mock and preview commands.
 diameter. `yuzu_contour_preview.py` publishes JSON on `/yuzu/contour_preview`
 with `horizontal_diameter_mm`, validity, and `motion_enabled: false`. The
 preview never commands a drive. The mock and real detector must not publish
-together. The detector's assumed 50/232 mm per pixel requires calibration at
+together. The `centdist4.py` detector's assumed 50/410 mm per pixel requires calibration at
 the installed camera position. Its message has no fruit ID or capture time;
 select and hold a measurement for the fruit being processed before using it
 in a sequence.
 
 ## Turning diameter into slide positions
 
-Before software can calculate Motor 3/4 absolute targets, measure the actual
-gap between blade reference surfaces at known slide positions, confirm which
+The operator reports 35 mm from the yuzu center to each blade at slide
+encoder 0 mm. Verify the installed gap and confirm which
 way each slide moves, and define distinct clearances for grasp and peel.
 Verify fruit centering or provide left/right offsets. A reported 70 mm gap
-at both slides' zero is provisional and must be checked with the installed
-blades. The camera diameter cannot by itself determine a safe feed distance.
+at both slides' zero is consistent with the 35 mm radial measurement, but
+must be checked with the installed blades. A single diameter cannot define
+the 5° contour feed distances.
 
-Once those quantities are calibrated, derive each slide target from the
-diameter and its own blade geometry, reject any target outside 0..20 mm,
-and require a fresh measurement for the current fruit. Do not clip an
-unreachable target. Keep Motor 5 angle targets independent of the camera
-diameter. The proposed 5° orbit and slide update plan is recorded in
-`MOTOR5_PEEL_ORBIT.md`; calibration is required before changing the GUI
-sequence or enabling automatic slide targets.
+The preliminary slide target is `35 - mean(radius_primary, radius_mirror)`
+mm using the inset contour points for each blade. Reject any target outside 0..20 mm;
+do not clip it. The 5° orbit and required angle mapping are recorded in
+`MOTOR5_PEEL_ORBIT.md`. Confirm the detector-angle direction and blade
+geometry before changing the GUI sequence or enabling automatic slide
+targets.
 
 ## Existing guarded interfaces
 

@@ -51,6 +51,14 @@ class YuzuDetector(Node):
             10
         )
 
+        # All 12 inset contour rays, including the red 0-degree top point.
+        # Keep the 11-point yellow topic unchanged for existing subscribers.
+        self.contour_points_pub = self.create_publisher(
+            Float32MultiArray,
+            "/yuzu/contour_point_offsets",
+            10
+        )
+
         # ==========================
         # Diameter Publisher (30-180 deg paired with 210-360 deg)
         # ==========================
@@ -99,12 +107,12 @@ class YuzuDetector(Node):
     # ==================================================
     # Intersection of the ray and the contour
     # ==================================================
-    def get_angle_points(self, cx, cy, contour):
+    def get_angle_points(self, cx, cy, contour, angle_step_deg=30):
         result = []
 
         pts = contour[:, 0, :]
 
-        for angle in range(0, 360, 30):
+        for angle in range(0, 360, angle_step_deg):
             theta = np.deg2rad(angle - 90)
 
             dx = np.cos(theta)
@@ -222,7 +230,10 @@ class YuzuDetector(Node):
                 dtype=np.int32
             ).reshape((-1, 1, 2))
 
-            points = self.get_angle_points(cx, cy, moved)
+            # Measure the actual inset contour every 5 degrees. Keep the
+            # existing drawn dots, diameters, and yellow topic at 30 degrees.
+            dense_points = self.get_angle_points(cx, cy, moved, 5)
+            points = [(angle, point) for angle, point in dense_points if angle % 30 == 0]
 
             elapsed = time.perf_counter() - start
 
@@ -395,7 +406,7 @@ class YuzuDetector(Node):
             )
 
             # --------------------------
-            # Draw dots, putText XY coords (all 12 dots), & collect 11 yellow dot offsets
+            # Draw the legacy 30-degree dots and collect the 11-point yellow array.
             # --------------------------
             yellow_offsets_data = []
 
@@ -459,6 +470,27 @@ class YuzuDetector(Node):
                 ]
                 offset_msg.data = yellow_offsets_data
                 self.yellow_dots_pub.publish(offset_msg)
+
+            # Publish all 72 measured rays, including the red 0-degree point.
+            # Do not interpolate from the legacy 30-degree dots.
+            contour_offsets_data = []
+            for angle, (px, py) in dense_points:
+                contour_offsets_data.extend([
+                    float(angle),
+                    float((px - cx) * mm_per_pixel),
+                    float((cy - py) * mm_per_pixel),
+                ])
+
+            # Publish only a complete 0..355-degree profile; incomplete frames
+            # must not become a Motor 3/4 feed reference.
+            if len(contour_offsets_data) == 216:
+                contour_msg = Float32MultiArray()
+                contour_msg.layout.dim = [
+                    MultiArrayDimension(label="contour_points_5deg", size=72, stride=216),
+                    MultiArrayDimension(label="angle_dx_dy_mm", size=3, stride=3)
+                ]
+                contour_msg.data = contour_offsets_data
+                self.contour_points_pub.publish(contour_msg)
 
             cv2.putText(
                 img,

@@ -1,8 +1,9 @@
 # Yuzu horizontal diameter preview
 
-The camera measurement is the horizontal diameter of one yuzu. Motors 3 and 4
-use it as a reference for grasp and peel positions. Motor 5 follows the fixed
-machine sequence; it does not follow individual camera contour rays.
+This is the older horizontal-diameter preview. The current Step 3 contour
+feed and Motor 5 orbit are specified in [MOTOR5_PEEL_ORBIT.md](MOTOR5_PEEL_ORBIT.md).
+This preview still reports one yuzu's horizontal diameter without commanding
+motors.
 
 The preview subscribes to `/yuzu/yellow_dot_offsets`
 (`std_msgs/msg/Float32MultiArray`). The detector message contains 11 triples

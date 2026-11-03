@@ -36,7 +36,7 @@ AXIS1_MAX_MM = 400.0
 AXIS1_INCREMENT_MM = 0.0012
 AXIS1_PARK_MM = 0.0
 AXIS1_VELOCITY_MM_S = 600.0
-AXIS1_ACCELERATION_MM_S2 = 600.0  # reaches 600 mm/s in 1 s
+AXIS1_ACCELERATION_MM_S2 = 450.0  # reaches 600 mm/s in 1.33 s on a long move
 AXIS2_GUI_MAX_RPM = 416.0  # 100% of the published Motor 2 output maximum
 AXIS2_ACCELERATION_RPM_S = 832.0  # reaches 416 rpm in 0.5 s
 MOTOR4_MIN_MM = 0.0
@@ -901,7 +901,7 @@ class YuzuOperatorGui:
         ttk.Label(
             frame,
             text=(
-                "Motor 1 ramps to/from its operating cap in 1 s; Motors 2–6 use 0.5 s ramps. "
+                "Motor 1 ramps to/from its operating cap in 1.33 s; Motors 2–6 use 0.5 s ramps. "
                 "Motor 3/4 use 80 mm/s² (below their 200 mm/s² rating); other values are software ramps, "
                 "not manufacturer acceleration ratings. Short moves may brake before reaching the cap. "
                 "Within Motor 1's 400 mm stroke, a rest-to-rest move cannot reach 600 mm/s and also stop."
@@ -914,7 +914,7 @@ class YuzuOperatorGui:
                 "Motors 2/5/6 416/150/60 rpm. GUI/guard speed caps match these catalog maxima. "
                 "Linear Motors 3/4 retain 20 mm project travel guards (30 mm catalog stroke). "
                 f"Motor 6 calibrated belt speed at 60 output rpm is {MOTOR6_GUI_MAX_MM_S:.1f} mm/s. "
-                "Motor 1's 600 mm/s² and rotary acceleration/deceleration settings are software profiles "
+                "Motor 1's 450 mm/s² and rotary acceleration/deceleration settings are software profiles "
                 "(rotary product pages do not specify max acceleration); validate the loaded machine. "
                 "Motor 5 has no intrinsic angular stop."
             ),

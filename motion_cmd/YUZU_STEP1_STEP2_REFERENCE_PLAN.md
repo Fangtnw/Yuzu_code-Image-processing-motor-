@@ -67,3 +67,28 @@ change the insertion target between those steps.
 The earlier 260 mm holder-to-conveyor-floor observation and approximately
 5 mm fruit-bottom gap remain historical measurements; they do not define the
 new camera-based Motor 1 target.
+
+## Live Step 1 check (2026-11-03)
+
+With the manually launched GUI, both EtherCAT slaves were OP, Motor 1 was
+Operation Enabled at about 0.006 mm home, and the active guard reported
+0.450 m/s² symmetric acceleration/deceleration. A fresh detector value of
+`-30.0 mm` produced a guarded Step 1 target of `234.0000 mm`. Motor 1 feedback
+settled at `234.0024 mm`. The first script attempt sent no target because its
+ROS publisher checked for a subscriber before discovery completed; the CLI
+now waits up to five seconds for that subscriber. The retry reached the
+target. No Step 2 lift was commanded. For a later lift, reuse the captured
+`--y-offset-mm -30` rather than reading a new camera offset after Motor 1 has
+moved; choose the lift distance explicitly. The operator then requested a
+150.00 mm Step 2 lift. With both EtherCAT slaves OP and Motor 1 Operation
+Enabled, the script commanded `84.0000 mm` using that same captured offset.
+Feedback settled at `84.0048 mm`. This completed the Step 1/2 motion demo;
+the measured positions do not by themselves establish physical piercing
+depth or fruit handling quality.
+
+The repeatable operator command is documented in
+[MOTOR1_VISION_HANDOFF.md](MOTOR1_VISION_HANDOFF.md): preview with
+`bash scripts/run_motor1_step1_step2_demo.sh`, then launch the manually
+supervised sequence with `bash scripts/run_motor1_step1_step2_demo.sh --execute`
+after Motor 1 is back at home and the detector is publishing for the next
+fruit. It captures one offset for both moves and leaves Motor 1 lifted.

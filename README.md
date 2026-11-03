@@ -172,12 +172,12 @@ scripts. New integrations should use the `/yuzu/motor*` contract in
 | 5 | peeler index | degrees from runtime zero | ±180°, 120 rpm (80% of 150 rpm output maximum) |
 | 6 | conveyor | mm/s and indexed distance steps | 90 mm/s (about 40.35 rpm), 140 mm per step |
 
-Motor 1 ramps to/from its 600 mm/s cap in 1 s using 600 mm/s². Motors 2–6 use
+Motor 1 ramps to/from its 600 mm/s cap in about 1.33 s using 450 mm/s². Motors 2–6 use
 0.5 s profiles: Motor 2 665.6 rpm/s; Motors 3/4 64 mm/s²; Motor 5 240 rpm/s;
 Motor 6 96 rpm/s. Motors 3/4 remain below their published 200 mm/s²
 acceleration maximum. These are software profiles; Motor 1's ramp must be
 validated on the loaded vertical assembly. Short position moves can brake
-before attaining the speed cap. A Motor 1 rest-to-rest move needs about 600 mm
+before attaining the speed cap. A Motor 1 rest-to-rest move needs about 800 mm
 to accelerate to 600 mm/s and brake at this ramp, so the guarded 400 mm stroke
 cannot reach that cap and stop in-range from rest. The manufacturer source register is
 `vendor/oriental_motor/MOTOR_SPEED_SOURCES.md`.

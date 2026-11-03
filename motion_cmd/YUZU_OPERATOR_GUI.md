@@ -17,12 +17,12 @@ protocol are specified in `MOTOR_ROS2_INTERFACE.md`.
   and 6. It is not an emergency stop; keep the physical power cutoff
   accessible.
 - Motor 1's backend and GUI range is 0..400 mm. Its 600 mm/s speed cap matches
-  the actuator's published maximum; its symmetric 600 mm/s²
-  acceleration/deceleration ramps reach or stop from that cap in 1 s on a long
+  the actuator's published maximum; its symmetric 450 mm/s²
+  acceleration/deceleration ramps reach or stop from that cap in about 1.33 s on a long
   enough move. The catalog page does not give a maximum acceleration rating.
   The operator has validated 100 mm/s physically, so the cap and new ramp need
   staged validation on the loaded assembly. A rest-to-rest move at the full
-  600 mm/s cap needs about 600 mm to accelerate and brake, so it cannot reach
+  600 mm/s cap needs about 800 mm to accelerate and brake, so it cannot reach
   that cap and stop within the guarded 400 mm stroke.
 - Motor 1 now uses a provisional top home: 0 mm is raw encoder count 2,001,
   and positive targets move downward. This direction and the assembled travel

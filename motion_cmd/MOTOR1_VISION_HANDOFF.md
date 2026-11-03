@@ -46,3 +46,40 @@ mm/pixel. Verify it at the installed pose. The `Float32` topic has no fruit ID
 or capture timestamp, so a future automatic cycle must associate each offset
 with the fruit currently at Motor 1. The vision detector is owned and run by
 the separate camera team; the motor side only subscribes to its topic.
+
+## One-command Step 1/2 demo
+
+First launch the normal motor GUI manually and confirm Motor 1 is at home,
+the drives are enabled, and the detector is publishing for the fruit being
+processed. The demo script uses the same 204 mm frame reference, 0 mm extra
+allowance, and 150 mm lift as the successful test. From the repository root:
+
+```bash
+source /home/fang/kyutech/azd3a_ws/install/setup.bash
+ros2 run motor_controller yuzu_motor1_reference --offset-from-detector --step demo --lift-mm 150
+```
+
+Add `--execute` to that `ros2 run` command to perform both moves after the
+preview. The ROS package and executable are `motor_controller` and
+`yuzu_motor1_reference`.
+
+The equivalent repository helper is:
+
+```bash
+bash scripts/run_motor1_step1_step2_demo.sh
+```
+
+This previews a newly received detector offset and both targets without
+moving a motor. To run the sequence from home:
+
+```bash
+bash scripts/run_motor1_step1_step2_demo.sh --execute
+```
+
+The script does not start the GUI. It captures one `/yuzu/y_offset_mm` value,
+requires fresh Motor 1 position and Operation Enabled status near the measured
+home position, waits for the guarded command subscriber, commands insertion,
+waits for position feedback to settle, then commands a 150 mm lift using the
+same captured value. If any check fails, it exits without sending the next
+stage. The final position is the lifted position; returning home is a separate
+operator action. If the workspace is elsewhere, pass `--workspace /path/to/ws`.

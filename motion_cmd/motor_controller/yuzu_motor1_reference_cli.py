@@ -28,7 +28,8 @@ def build_parser():
                         help="Motor travel sign for a positive image Y offset; default -1")
     parser.add_argument("--lift-mm", type=float, default=None,
                         help="Step 2 lift distance, 100..150 mm; required to execute lift")
-    parser.add_argument("--step", choices=("plan", "insert", "lift"), default="plan")
+    parser.add_argument("--step", choices=("plan", "insert", "lift", "demo"), default="plan",
+                        help="demo performs insertion then lift using one captured offset")
     parser.add_argument("--execute", action="store_true",
                         help="Publish the selected guarded Motor 1 target")
     return parser
@@ -65,7 +66,7 @@ def main():
             reader.destroy_node()
             if rclpy.ok():
                 rclpy.shutdown()
-    if args.execute and args.step == "lift" and args.lift_mm is None:
+    if args.execute and args.step in ("lift", "demo") and args.lift_mm is None:
         raise SystemExit("Specify --lift-mm 100..150 explicitly for Step 2 motion")
     lift_mm = 120.0 if args.lift_mm is None else args.lift_mm
     targets = Motor1CameraReference(
@@ -83,7 +84,7 @@ def main():
     if not args.execute:
         return
     if args.step == "plan":
-        raise SystemExit("Choose --step insert or --step lift with --execute")
+        raise SystemExit("Choose --step insert, lift, or demo with --execute")
 
     import rclpy
     from control_msgs.msg import DynamicJointState
@@ -134,29 +135,45 @@ def main():
             rclpy.spin_once(node, timeout_sec=0.1)
         if not node.ready():
             raise RuntimeError("Motor 1 has no fresh position and Operation Enabled feedback")
-        selected = targets["insertion_target_mm" if args.step == "insert" else "lift_target_mm"]
-        if args.step == "insert" and abs(node.position_mm - targets["home_position_mm"]) > 0.1:
+        if args.step in ("insert", "demo") and abs(node.position_mm - targets["home_position_mm"]) > 0.1:
             raise RuntimeError("Step 1 insertion requires Motor 1 at the measured home position")
         if args.step == "lift" and abs(node.position_mm - targets["insertion_target_mm"]) > 0.1:
             raise RuntimeError("Step 2 lift requires Motor 1 at the calculated Step 1 insertion target")
+        subscriber_deadline = time.monotonic() + 5.0
+        while node.pub.get_subscription_count() == 0 and time.monotonic() < subscriber_deadline:
+            rclpy.spin_once(node, timeout_sec=0.1)
         if node.pub.get_subscription_count() == 0:
-            raise RuntimeError("No subscriber on guarded Motor 1 command topic")
-        node.pub.publish(Float64(data=selected))
-        print(f"Published guarded Motor 1 {args.step} target {selected:.4f} mm")
-        deadline = time.monotonic() + 30.0
-        settled_since = None
-        while time.monotonic() < deadline:
-            rclpy.spin_once(node, timeout_sec=0.05)
-            if not node.ready():
-                raise RuntimeError("Motor 1 feedback/status became stale or disabled; inspect drive and stop machine")
-            if abs(node.position_mm - selected) <= 0.05:
-                settled_since = settled_since or time.monotonic()
-                if time.monotonic() - settled_since >= 0.3:
-                    print(f"Motor 1 reached {node.position_mm:.4f} mm")
-                    return
-            else:
-                settled_since = None
-        raise RuntimeError("Motor 1 did not reach the requested position within 30 seconds")
+            raise RuntimeError("No subscriber on guarded Motor 1 command topic within 5 seconds")
+        if not node.ready():
+            raise RuntimeError("Motor 1 feedback/status became stale or disabled before command")
+
+        def publish_and_wait(stage, selected):
+            node.pub.publish(Float64(data=selected))
+            print(f"Published guarded Motor 1 {stage} target {selected:.4f} mm", flush=True)
+            deadline = time.monotonic() + 30.0
+            settled_since = None
+            while time.monotonic() < deadline:
+                rclpy.spin_once(node, timeout_sec=0.05)
+                if not node.ready():
+                    raise RuntimeError("Motor 1 feedback/status became stale or disabled; inspect drive and stop machine")
+                if abs(node.position_mm - selected) <= 0.05:
+                    settled_since = settled_since or time.monotonic()
+                    if time.monotonic() - settled_since >= 0.3:
+                        print(f"Motor 1 reached {node.position_mm:.4f} mm", flush=True)
+                        return
+                else:
+                    settled_since = None
+            raise RuntimeError(f"Motor 1 did not reach {stage} target within 30 seconds")
+
+        if args.step in ("insert", "demo"):
+            publish_and_wait("insert", targets["insertion_target_mm"])
+        if args.step == "demo":
+            if abs(node.position_mm - targets["insertion_target_mm"]) > 0.1:
+                raise RuntimeError("Step 2 requires Motor 1 at the calculated insertion target")
+            publish_and_wait("lift", targets["lift_target_mm"])
+            print("Motor 1 Step 1 and Step 2 demo complete", flush=True)
+        elif args.step == "lift":
+            publish_and_wait("lift", targets["lift_target_mm"])
     finally:
         node.destroy_node()
         if rclpy.ok():
